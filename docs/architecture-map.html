@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HodgeSpot — BlunderBus Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --surface: #161b22;
+      --surface2: #1c2230;
+      --border: #30363d;
+      --accent: #58a6ff;
+      --accent2: #3fb950;
+      --accent3: #f78166;
+      --accent4: #d2a8ff;
+      --accent5: #ffa657;
+      --text: #e6edf3;
+      --muted: #8b949e;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 24px 40px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    header .logo {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #58a6ff, #d2a8ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    header .sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    header .badge {
+      margin-left: auto;
+      background: #1c2230;
+      border: 1px solid #30363d;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 12px;
+      color: var(--accent2);
+    }
+
+    .content {
+      flex: 1;
+      padding: 32px 40px;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+    }
+
+    .diagram-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      overflow: auto;
+    }
+
+    .diagram-panel h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+
+    .mermaid {
+      display: flex;
+      justify-content: center;
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+    }
+
+    .card h3 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .vm-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .vm-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: var(--surface2);
+      font-size: 13px;
+    }
+
+    .vm-row .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot.running { background: #3fb950; box-shadow: 0 0 6px #3fb95066; }
+    .dot.stopped { background: #8b949e; }
+
+    .vm-row .vmid {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--muted);
+      width: 28px;
+    }
+
+    .vm-row .name {
+      font-weight: 600;
+      color: var(--text);
+      flex: 1;
+    }
+
+    .vm-row .ip {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--accent);
+    }
+
+    .vm-row .type-badge {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .type-badge.qemu { background: #1c3a5e; color: #58a6ff; }
+    .type-badge.lxc  { background: #1e3a2a; color: #3fb950; }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .legend-dot {
+      width: 10px; height: 10px;
+      border-radius: 3px;
+    }
+
+    footer {
+      padding: 12px 40px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    footer span { font-family: monospace; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">⚡ BlunderBus</div>
+    <div class="sub">HodgeSpot Home Lab — Proxmox Node: Multiverse</div>
+  </div>
+  <div class="badge">● All systems running</div>
+</header>
+
+<div class="content">
+
+  <div class="diagram-panel">
+    <h2>Network Architecture</h2>
+    <div class="mermaid">
+graph TB
+    %% Internet & Edge
+    INET(["🌐 Internet"])
+    PF["🛡️ pfSense\npfsense.hodgespot.com"]
+    RTR["📡 ASUS GT-AXE16000\n192.168.50.1"]
+
+    INET --> PF --> RTR
+
+    %% DNS
+    subgraph DNS ["🔵 DNS Layer"]
+        GROOT["200 · Groot\n192.168.50.53\nAdGuard Home :3000"]
+    end
+
+    RTR --> DNS
+
+    %% Compute cluster
+    subgraph PROXMOX ["🟣 Proxmox · Multiverse"]
+        direction TB
+
+        subgraph QEMU ["Virtual Machines (QEMU)"]
+            HEIMDALL["100 · Heimdall\n192.168.50.50\nTrueNAS SCALE\nZFS · NAS"]
+            THOR["101 · Thor\n192.168.50.136\nOllama qwen3:14b\nRTX 4080"]
+            JARVIS["102 · Jarvis\n192.168.50.206\nHome Assistant"]
+            FURY["103 · Fury\n192.168.50.103\n⚠️ SecOnion IDS\nRead-Only"]
+            STARK["104 · Stark\n192.168.50.204\nNPM · Portainer\nOpen WebUI · MQTT"]
+            CORTEX["106 · Cortex\n192.168.50.106\nLiteLLM · Langfuse\nPostgres · Redis\nMinIO · ClickHouse"]
+        end
+
+        subgraph LXC ["Containers (LXC)"]
+            BANNER["202 · Banner\n192.168.50.202\nGrafana · Prometheus"]
+            HAWKEYE["205 · Hawkeye\n192.168.50.205\nFrigate NVR :5000"]
+            LOKI["207 · Loki\n192.168.50.207\nLoki :3100"]
+            ULTRON["209 · Ultron\n192.168.50.209\nUtility / Bastion"]
+            VISION["210 · Vision\n192.168.50.210\nBlunderBus MCP :8788\nVision Server :8787\nFrigate MQTT Bridge"]
+        end
+    end
+
+    RTR --> PROXMOX
+
+    %% Internal service links
+    CORTEX -->|"LLM API"| THOR
+    STARK -->|"Reverse Proxy"| CORTEX
+    STARK -->|"Reverse Proxy"| BANNER
+    VISION -->|"MQTT events"| HAWKEYE
+    VISION -->|"MQTT"| STARK
+    LOKI -->|"logs"| BANNER
+    JARVIS -->|"automations"| STARK
+
+    %% IoT
+    subgraph IOT ["🏠 IoT / LAN Devices"]
+        WIZ["WiZ Smart Lights\n(×20+)"]
+        SONOS["Sonos Speakers"]
+        NEST["Nest Thermostat"]
+        CAM["Cameras → Frigate"]
+    end
+
+    RTR --> IOT
+    IOT --> JARVIS
+    CAM --> HAWKEYE
+
+    %% Monitoring flows
+    BANNER -.->|"scrape metrics"| CORTEX
+    BANNER -.->|"scrape metrics"| THOR
+    BANNER -.->|"scrape metrics"| STARK
+
+    classDef qemuNode fill:#1c3a5e,stroke:#58a6ff,color:#e6edf3,rx:8
+    classDef lxcNode  fill:#1e3a2a,stroke:#3fb950,color:#e6edf3,rx:8
+    classDef edgeNode fill:#2a1e3a,stroke:#d2a8ff,color:#e6edf3,rx:8
+    classDef iotNode  fill:#2a2a1e,stroke:#ffa657,color:#e6edf3,rx:8
+    classDef dnsNode  fill:#1e2a3a,stroke:#58a6ff,color:#e6edf3,rx:8
+    classDef readOnly fill:#3a1e1e,stroke:#f78166,color:#e6edf3,rx:8
+
+    class HEIMDALL,THOR,JARVIS,STARK,CORTEX qemuNode
+    class BANNER,HAWKEYE,LOKI,ULTRON,VISION lxcNode
+    class FURY readOnly
+    class PF,RTR edgeNode
+    class WIZ,SONOS,NEST,CAM iotNode
+    class GROOT dnsNode
+    </div>
+  </div>
+
+  <div class="sidebar">
+
+    <div class="card">
+      <h3>Virtual Machines (QEMU)</h3>
+      <div class="vm-list">
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">100</div><div class="name">Heimdall</div><div class="ip">.50</div><span class="type-badge qemu">qemu</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">101</div><div class="name">Thor</div><div class="ip">.136</div><span class="type-badge qemu">qemu</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">102</div><div class="name">Jarvis</div><div class="ip">.206</div><span class="type-badge qemu">qemu</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">103</div><div class="name">Fury ⚠️</div><div class="ip">.103</div><span class="type-badge qemu">qemu</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">104</div><div class="name">Stark</div><div class="ip">.204</div><span class="type-badge qemu">qemu</span></div>
+        <div class="vm-row"><div class="dot stopped"></div><div class="vmid">105</div><div class="name">hawkeye</div><div class="ip">—</div><span class="type-badge qemu">qemu</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">106</div><div class="name">Cortex</div><div class="ip">.106</div><span class="type-badge qemu">qemu</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Containers (LXC)</h3>
+      <div class="vm-list">
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">200</div><div class="name">Groot</div><div class="ip">.53</div><span class="type-badge lxc">lxc</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">202</div><div class="name">Banner</div><div class="ip">.202</div><span class="type-badge lxc">lxc</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">205</div><div class="name">Hawkeye</div><div class="ip">.205</div><span class="type-badge lxc">lxc</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">207</div><div class="name">Loki</div><div class="ip">.207</div><span class="type-badge lxc">lxc</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">209</div><div class="name">Ultron</div><div class="ip">.209</div><span class="type-badge lxc">lxc</span></div>
+        <div class="vm-row"><div class="dot running"></div><div class="vmid">210</div><div class="name">Vision</div><div class="ip">.210</div><span class="type-badge lxc">lxc</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Legend</h3>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-dot" style="background:#1c3a5e;border:1px solid #58a6ff"></div> QEMU VM</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#1e3a2a;border:1px solid #3fb950"></div> LXC Container</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#3a1e1e;border:1px solid #f78166"></div> Read-Only</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#2a2a1e;border:1px solid #ffa657"></div> IoT Device</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#2a1e3a;border:1px solid #d2a8ff"></div> Edge / Router</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#1e2a3a;border:1px solid #58a6ff"></div> DNS</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Key Services</h3>
+      <div class="vm-list" style="gap:4px">
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">LiteLLM / Langfuse</div><div class="ip">Cortex</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">Grafana / Prometheus</div><div class="ip">Banner</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">AdGuard Home</div><div class="ip">Groot</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">Frigate NVR</div><div class="ip">Hawkeye</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">BlunderBus MCP</div><div class="ip">Vision</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">Ollama qwen3:14b</div><div class="ip">Thor</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">Home Assistant</div><div class="ip">Jarvis</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">Vaultwarden</div><div class="ip">hodgespot.com</div></div>
+        <div class="vm-row" style="font-size:12px"><div class="dot running"></div><div style="flex:1">Loki Logs</div><div class="ip">Loki :3100</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<footer>
+  <div>HodgeSpot Homelab · Proxmox node: <span>Multiverse</span> · Domain: <span>hodgespot.com</span></div>
+  <div>Generated by BlunderBus · <span>2026-03-12</span></div>
+</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    themeVariables: {
+      background: '#161b22',
+      primaryColor: '#1c3a5e',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor: '#58a6ff',
+      lineColor: '#58a6ff',
+      secondaryColor: '#1e3a2a',
+      tertiaryColor: '#1c2230',
+      edgeLabelBackground: '#161b22',
+      clusterBkg: '#1c2230',
+      clusterBorder: '#30363d',
+      titleColor: '#e6edf3',
+      nodeTextColor: '#e6edf3',
+      fontFamily: 'Segoe UI, system-ui, sans-serif',
+      fontSize: '13px',
+    },
+    flowchart: {
+      curve: 'basis',
+      padding: 20,
+      nodeSpacing: 40,
+      rankSpacing: 60,
+    }
+  });
+</script>
+</body>
+</html>

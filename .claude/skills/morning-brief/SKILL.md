@@ -6,6 +6,8 @@ allowed-tools: Bash
 
 # Morning Brief — Daily Infrastructure Summary
 
+> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+
 ## What This Does
 Compiles an executive summary of the last 24 hours across all HodgeSpot systems. Designed to be run as a scheduled task in Claude Code Desktop.
 
@@ -20,18 +22,21 @@ Every day at 7:00 AM: Run /morning-brief
 ### 1. Infrastructure health snapshot
 Run the `/infra-check` sweep:
 ```bash
-for host in 192.168.50.106 192.168.50.204 192.168.50.136 192.168.50.202 192.168.50.50 192.168.50.206 192.168.50.207; do
+for host in cortex stark banner truenas homeassistant loki; do
   echo "=== $host ==="
-  ssh -o ConnectTimeout=5 user@"$host" "uptime && free -h | grep Mem && df -h / | tail -1" 2>&1 || echo "❌ Unreachable"
+  ssh "$host" "uptime && free -h | grep Mem && df -h / | tail -1" 2>&1 || echo "❌ Unreachable"
 done
+# Thor (192.168.50.136) is the local workstation — run locally
+echo "=== thor (local) ==="
+uptime && free -h | grep Mem && df -h / | tail -1
 ```
 
 ### 2. Docker container status
 ```bash
 echo "=== Cortex ==="
-ssh -o ConnectTimeout=5 user@192.168.50.106 "docker ps --format '{{.Names}}: {{.Status}}'"
+ssh cortex "docker ps --format '{{.Names}}: {{.Status}}'"
 echo "=== Stark ==="
-ssh -o ConnectTimeout=5 user@192.168.50.204 "docker ps --format '{{.Names}}: {{.Status}}'"
+ssh stark "docker ps --format '{{.Names}}: {{.Status}}'"
 ```
 
 ### 3. Security events (24h)
@@ -62,7 +67,7 @@ curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
 
 ### 7. Prometheus alerts (24h)
 ```bash
-curl -s "http://192.168.50.202:9090/api/v1/alerts" | jq '.data.alerts[] | {alertname: .labels.alertname, state: .state, severity: .labels.severity}'
+ssh banner 'curl -s "http://localhost:9090/api/v1/alerts"' | jq '.data.alerts[] | {alertname: .labels.alertname, state: .state, severity: .labels.severity}'
 ```
 
 ## Report Format

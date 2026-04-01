@@ -6,6 +6,8 @@ allowed-tools: Bash
 
 # Infra Check — VM Health via SSH
 
+> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+
 ## What This Does
 SSH into each VM to check system resources: uptime, CPU load, memory usage, and disk space.
 
@@ -13,33 +15,36 @@ SSH into each VM to check system resources: uptime, CPU load, memory usage, and 
 
 ### Quick health check on a single host
 ```bash
-ssh -o ConnectTimeout=5 user@<HOST_IP> "echo '--- Uptime ---' && uptime && echo '--- Memory ---' && free -h && echo '--- Disk ---' && df -h / && echo '--- Load ---' && cat /proc/loadavg"
+ssh <ALIAS> "echo '--- Uptime ---' && uptime && echo '--- Memory ---' && free -h && echo '--- Disk ---' && df -h / && echo '--- Load ---' && cat /proc/loadavg"
 ```
 
 ### Sweep all VMs
 ```bash
-for host in 192.168.50.106 192.168.50.204 192.168.50.136 192.168.50.202 192.168.50.50 192.168.50.206 192.168.50.207; do
+for host in cortex stark banner truenas homeassistant loki; do
   echo "=== $host ==="
-  ssh -o ConnectTimeout=5 user@"$host" "uptime && free -h | grep Mem && df -h / | tail -1" 2>&1 || echo "❌ Unreachable"
+  ssh "$host" "uptime && free -h | grep Mem && df -h / | tail -1" 2>&1 || echo "❌ Unreachable"
   echo ""
 done
+# Thor (192.168.50.136) is the local workstation — run commands locally, not over SSH
+echo "=== thor (local) ==="
+uptime && free -h | grep Mem && df -h / | tail -1
 ```
 
 ### Check specific metrics
 
 **Top processes by CPU:**
 ```bash
-ssh -o ConnectTimeout=5 user@<HOST_IP> "ps aux --sort=-%cpu | head -10"
+ssh <ALIAS> "ps aux --sort=-%cpu | head -10"
 ```
 
 **Top processes by memory:**
 ```bash
-ssh -o ConnectTimeout=5 user@<HOST_IP> "ps aux --sort=-%mem | head -10"
+ssh <ALIAS> "ps aux --sort=-%mem | head -10"
 ```
 
 **Disk I/O:**
 ```bash
-ssh -o ConnectTimeout=5 user@<HOST_IP> "iostat -x 1 3 2>/dev/null || cat /proc/diskstats"
+ssh <ALIAS> "iostat -x 1 3 2>/dev/null || cat /proc/diskstats"
 ```
 
 ## Report Format

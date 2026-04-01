@@ -1,0 +1,113 @@
+# Copy these host aliases into ~/.ssh/config if they are missing.
+# Authentication should come from your local SSH agent, such as Bitwarden Desktop
+# signed into your Vaultwarden server with SSH Agent enabled.
+# Edit any usernames here if your host access model changes.
+#
+# SSH USER NOTES:
+#   - LXC containers (Banner, Groot, Loki, Ultron, Vision, Hawkeye/205): User=root
+#     (LXC containers are minimal Debian — no non-root users created by default)
+#   - QEMU VMs (Thor, TrueNAS): User=brian / truenas_admin as configured below
+#   - Cortex, Stark: User=root / blunderbus (Docker hosts, provisioned separately)
+#   - Proxmox host (Multiverse): User=root
+#
+# Grafana API (Banner): SSH then curl http://localhost:3000/api/...
+#   No auth token needed for read operations from localhost.
+#   Example: ssh banner 'curl -s http://localhost:3000/api/health'
+
+# --- Proxmox Host ---
+
+Host proxmox multiverse
+  HostName 192.168.50.100
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+# --- QEMU VMs ---
+
+Host homeassistant
+  HostName 192.168.50.206
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host fury
+  HostName 192.168.50.103
+  User brian
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host cortex
+  HostName 192.168.50.106
+  User root
+  ProxyJump stark
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host stark
+  HostName 192.168.50.204
+  User blunderbus
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host thor
+  HostName 192.168.50.136
+  User brian
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host truenas heimdall
+  HostName 192.168.50.50
+  User truenas_admin
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+# --- LXC Containers (root only) ---
+
+Host banner
+  HostName 192.168.50.202
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host groot
+  HostName 192.168.50.53
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host loki
+  HostName 192.168.50.207
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host ultron
+  HostName 192.168.50.209
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host vision
+  HostName 192.168.50.210
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey
+
+Host hawkeye-nvr
+  HostName 192.168.50.205
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey

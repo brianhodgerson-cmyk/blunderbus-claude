@@ -13,39 +13,39 @@ Queries Frigate NVR at 192.168.50.205:5000 for detection events, camera status, 
 
 ### List recent events (last 50)
 ```bash
-curl -s "http://192.168.50.205:5000/api/events?limit=50" | jq '.[] | {id: .id, camera: .camera, label: .label, score: .top_score, start: .start_time, end: .end_time, zones: .zones}'
+ssh hawkeye-nvr 'curl -s "http://localhost:5000/api/events?limit=50"' | jq '.[] | {id: .id, camera: .camera, label: .label, score: .top_score, start: .start_time, end: .end_time, zones: .zones}'
 ```
 
 ### Filter events by camera
 ```bash
-curl -s "http://192.168.50.205:5000/api/events?camera=<CAMERA_NAME>&limit=25" | jq '.[] | {label: .label, score: .top_score, start: .start_time}'
+ssh hawkeye-nvr 'curl -s "http://localhost:5000/api/events?camera=<CAMERA_NAME>&limit=25"' | jq '.[] | {label: .label, score: .top_score, start: .start_time}'
 ```
 
 ### Filter events by label (person, car, dog, etc.)
 ```bash
-curl -s "http://192.168.50.205:5000/api/events?label=<LABEL>&limit=25" | jq '.[] | {camera: .camera, score: .top_score, start: .start_time, zones: .zones}'
+ssh hawkeye-nvr 'curl -s "http://localhost:5000/api/events?label=<LABEL>&limit=25"' | jq '.[] | {camera: .camera, score: .top_score, start: .start_time, zones: .zones}'
 ```
 
 ### Get camera status / stats
 ```bash
-curl -s "http://192.168.50.205:5000/api/stats" | jq '.cameras | to_entries[] | {camera: .key, fps: .value.camera_fps, detection_fps: .value.detection_fps, pid: .value.pid}'
+ssh hawkeye-nvr 'curl -s http://localhost:5000/api/stats' | jq '.cameras | to_entries[] | {camera: .key, fps: .value.camera_fps, detection_fps: .value.detection_fps, pid: .value.pid}'
 ```
 
 ### Get Frigate config
 ```bash
-curl -s "http://192.168.50.205:5000/api/config" | jq '.cameras | keys'
+ssh hawkeye-nvr 'curl -s http://localhost:5000/api/config' | jq '.cameras | keys'
 ```
 
 ### Get event thumbnail
 ```bash
 # Returns JPEG image
-curl -s "http://192.168.50.205:5000/api/events/<EVENT_ID>/thumbnail.jpg" -o /tmp/event_thumb.jpg
+ssh hawkeye-nvr 'curl -s http://localhost:5000/api/events/<EVENT_ID>/thumbnail.jpg' > /tmp/event_thumb.jpg
 ```
 
 ### Events in a time range
 ```bash
 # Unix timestamps
-curl -s "http://192.168.50.205:5000/api/events?after=<START_UNIX>&before=<END_UNIX>&limit=50" | jq '.[] | {camera: .camera, label: .label, score: .top_score, start: .start_time}'
+ssh hawkeye-nvr 'curl -s "http://localhost:5000/api/events?after=<START_UNIX>&before=<END_UNIX>&limit=50"' | jq '.[] | {camera: .camera, label: .label, score: .top_score, start: .start_time}'
 ```
 
 ## Report Format

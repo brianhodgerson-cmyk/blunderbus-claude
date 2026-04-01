@@ -20,7 +20,7 @@ Run these BEFORE any stack operation:
 
 ```bash
 # Example pre-check on Cortex
-ssh -o ConnectTimeout=5 user@192.168.50.106 "
+ssh cortex "
   echo '=== Disk ===' && df -h / | tail -1
   echo '=== Memory ===' && free -h | grep Mem
   echo '=== Containers ===' && docker ps --format '{{.Names}}: {{.Status}}'
@@ -38,7 +38,7 @@ Run these AFTER any stack operation:
 
 ```bash
 # Example post-check on Cortex
-ssh -o ConnectTimeout=5 user@192.168.50.106 "
+ssh cortex "
   echo '=== Containers ===' && docker ps --format '{{.Names}}: {{.Status}}'
   echo '=== Recent errors ===' && docker ps -q | xargs -I{} docker logs --since=2m {} 2>&1 | grep -i 'error\|fatal\|panic' | head -20
 "

@@ -6,6 +6,8 @@ allowed-tools: Bash
 
 # System Status — Full Topology Sweep
 
+> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+
 ## What This Does
 Checks every VM and service in the HodgeSpot cluster for reachability and health.
 
@@ -18,20 +20,20 @@ for host in 192.168.50.106 192.168.50.204 192.168.50.136 192.168.50.202 192.168.
 done
 ```
 
-### 2. Docker status on Cortex (192.168.50.106)
+### 2. Docker status on Cortex
 ```bash
-ssh -o ConnectTimeout=5 user@192.168.50.106 "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+ssh cortex "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
 ```
 
-### 3. Docker status on Stark (192.168.50.204)
+### 3. Docker status on Stark
 ```bash
-ssh -o ConnectTimeout=5 user@192.168.50.204 "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
+ssh stark "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
 ```
 
 ### 4. Key service HTTP checks
 ```bash
-# Grafana
-curl -s -o /dev/null -w "%{http_code}" http://192.168.50.202:3000/api/health
+# Grafana (via Banner localhost)
+ssh banner 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/api/health'
 
 # Home Assistant
 curl -s -o /dev/null -w "%{http_code}" http://192.168.50.206:8123/api/
@@ -40,7 +42,7 @@ curl -s -o /dev/null -w "%{http_code}" http://192.168.50.206:8123/api/
 curl -s -o /dev/null -w "%{http_code}" http://192.168.50.205:5000/api/version
 
 # Loki ready
-curl -s -o /dev/null -w "%{http_code}" http://192.168.50.207:3100/ready
+ssh loki 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3100/ready'
 ```
 
 ### 5. Report format

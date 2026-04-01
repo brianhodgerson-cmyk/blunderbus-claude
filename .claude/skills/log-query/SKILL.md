@@ -6,6 +6,8 @@ allowed-tools: Bash
 
 # Log Query — Loki + Docker Logs
 
+> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+
 ## What This Does
 Queries centralized logs in Loki (192.168.50.207:3100) using LogQL, or pulls Docker container logs directly via SSH.
 
@@ -13,39 +15,39 @@ Queries centralized logs in Loki (192.168.50.207:3100) using LogQL, or pulls Doc
 
 ### Loki — Query recent logs by job/service
 ```bash
-curl -s -G "http://192.168.50.207:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={job="<JOB_NAME>"}' \
-  --data-urlencode "start=$(date -d '1 hour ago' +%s)000000000" \
+ssh loki 'curl -s -G "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode "query={job=\"<JOB_NAME>\"}" \
+  --data-urlencode "start=$(date -d "1 hour ago" +%s)000000000" \
   --data-urlencode "end=$(date +%s)000000000" \
-  --data-urlencode "limit=100" | jq '.data.result[].values[][1]'
+  --data-urlencode "limit=100"' | jq '.data.result[].values[][1]'
 ```
 
 ### Loki — Search for error patterns
 ```bash
-curl -s -G "http://192.168.50.207:3100/loki/api/v1/query_range" \
-  --data-urlencode 'query={job="<JOB_NAME>"} |~ "(?i)(error|fail|panic|critical)"' \
-  --data-urlencode "start=$(date -d '1 hour ago' +%s)000000000" \
+ssh loki 'curl -s -G "http://localhost:3100/loki/api/v1/query_range" \
+  --data-urlencode "query={job=\"<JOB_NAME>\"} |~ \"(?i)(error|fail|panic|critical)\"" \
+  --data-urlencode "start=$(date -d "1 hour ago" +%s)000000000" \
   --data-urlencode "end=$(date +%s)000000000" \
-  --data-urlencode "limit=50" | jq '.data.result[].values[][1]'
+  --data-urlencode "limit=50"' | jq '.data.result[].values[][1]'
 ```
 
 ### Loki — List available label values
 ```bash
 # List all jobs
-curl -s "http://192.168.50.207:3100/loki/api/v1/label/job/values" | jq '.data[]'
+ssh loki 'curl -s "http://localhost:3100/loki/api/v1/label/job/values"' | jq '.data[]'
 ```
 
 ### Docker logs — Direct from host
 ```bash
 # Cortex containers
-ssh -o ConnectTimeout=5 user@192.168.50.106 "docker logs --tail=50 --since=1h <CONTAINER_NAME>"
+ssh cortex "docker logs --tail=50 --since=1h <CONTAINER_NAME>"
 
 # Stark containers
-ssh -o ConnectTimeout=5 user@192.168.50.204 "docker logs --tail=50 --since=1h <CONTAINER_NAME>"
+ssh stark "docker logs --tail=50 --since=1h <CONTAINER_NAME>"
 ```
 
 ### Loki — Aggregate error count
 ```bash
-curl -s -G "http://192.168.50.207:3100/loki/api/v1/query" \
-  --data-urlencode 'query=count_over_time({job="<JOB_NAME>"} |~ "error" [1h])' | jq '.data.result'
+ssh loki 'curl -s -G "http://localhost:3100/loki/api/v1/query" \
+  --data-urlencode "query=count_over_time({job=\"<JOB_NAME>\"} |~ \"error\" [1h])"' | jq '.data.result'
 ```

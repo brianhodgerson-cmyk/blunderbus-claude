@@ -6,6 +6,9 @@ allowed-tools: Bash
 
 # Ollama Status — Thor GPU + Open WebUI
 
+> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+> Note: Thor (192.168.50.136) is the local workstation. Ollama API calls hit localhost or 192.168.50.136 directly. GPU commands run locally, not over SSH.
+
 ## What This Does
 Monitors the local LLM inference stack: Ollama on Thor (192.168.50.136) with RTX 4080, and Open WebUI on Stark (192.168.50.204).
 
@@ -13,43 +16,43 @@ Monitors the local LLM inference stack: Ollama on Thor (192.168.50.136) with RTX
 
 ### Ollama — List loaded models
 ```bash
-curl -s http://192.168.50.136:11434/api/tags | jq '.models[] | {name: .name, size: .size, modified: .modified_at}'
+curl -s http://localhost:11434/api/tags | jq '.models[] | {name: .name, size: .size, modified: .modified_at}'
 ```
 
 ### Ollama — Currently running models
 ```bash
-curl -s http://192.168.50.136:11434/api/ps | jq '.models[] | {name: .name, size: .size, vram: .size_vram, expires: .expires_at}'
+curl -s http://localhost:11434/api/ps | jq '.models[] | {name: .name, size: .size, vram: .size_vram, expires: .expires_at}'
 ```
 
 ### Ollama — Service health
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://192.168.50.136:11434/
+curl -s -o /dev/null -w "%{http_code}" http://localhost:11434/
 ```
 Expected: `200` with "Ollama is running"
 
-### GPU utilization (via SSH)
+### GPU utilization (local — Thor is this workstation)
 ```bash
-ssh -o ConnectTimeout=5 user@192.168.50.136 "nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader"
+nvidia-smi --query-gpu=name,temperature.gpu,utilization.gpu,utilization.memory,memory.used,memory.total --format=csv,noheader
 ```
 
-### GPU processes
+### GPU processes (local)
 ```bash
-ssh -o ConnectTimeout=5 user@192.168.50.136 "nvidia-smi --query-compute-apps=pid,name,used_memory --format=csv,noheader"
+nvidia-smi --query-compute-apps=pid,name,used_memory --format=csv,noheader
 ```
 
 ### Open WebUI — Health check
 ```bash
-curl -s -o /dev/null -w "%{http_code}" http://192.168.50.204:3000/
+ssh stark 'curl -s -o /dev/null -w "%{http_code}" http://localhost:3000/'
 ```
 
 ### Open WebUI — Container status
 ```bash
-ssh -o ConnectTimeout=5 user@192.168.50.204 "docker ps --filter name=open-webui --format '{{.Names}}: {{.Status}}'"
+ssh stark "docker ps --filter name=open-webui --format '{{.Names}}: {{.Status}}'"
 ```
 
 ### Test inference
 ```bash
-curl -s http://192.168.50.136:11434/api/generate \
+curl -s http://localhost:11434/api/generate \
   -d '{"model": "qwen3:14b", "prompt": "ping", "stream": false}' | jq '{model: .model, eval_count: .eval_count, eval_duration: .eval_duration}'
 ```
 

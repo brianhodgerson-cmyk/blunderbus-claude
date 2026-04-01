@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+.gcal_token.json
+scripts/.gcal_client_secret.json
 
 # Claude Code local settings
 .claude/settings.local.json
@@ -21,3 +23,35 @@ Thumbs.db
 
 # Temp
 /tmp/
+
+# Local Bitwarden mapping overrides
+scripts/bitwarden-env-map.local.psd1
+
+# Obsidian vault — personal notes and vault data (not versioned)
+Notes/
+Daily/
+Templates/
+.obsidian/
+10 - Projects/
+20 - Areas/
+30 - Resources/
+*.canvas
+
+# Loose personal files in repo root (Obsidian vault overlap)
+/*.pdf
+/*.xlsx
+/*.docx
+/2026-*.md
+/Libbey*.md
+/The start*.md
+
+# Python
+scripts/__pycache__/
+__pycache__/
+*.pyc
+
+# Logs directory
+logs/
+
+# Obsidian junction (Windows only, auto-created)
+claude/

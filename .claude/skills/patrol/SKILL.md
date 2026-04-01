@@ -6,6 +6,8 @@ allowed-tools: Bash
 
 # Patrol — Continuous Monitoring via /loop
 
+> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+
 ## What This Does
 Runs a continuous monitoring cycle using Claude's `/loop` feature. Each iteration checks system health, security posture, and service availability, then reports anomalies.
 
@@ -34,13 +36,13 @@ done
 
 ### 2. Container health (Cortex + Stark)
 ```bash
-ssh -o ConnectTimeout=5 user@192.168.50.106 "docker ps --format '{{.Names}} {{.Status}}' | grep -v 'Up'" 2>&1
-ssh -o ConnectTimeout=5 user@192.168.50.204 "docker ps --format '{{.Names}} {{.Status}}' | grep -v 'Up'" 2>&1
+ssh cortex "docker ps --format '{{.Names}} {{.Status}}' | grep -v 'Up'" 2>&1
+ssh stark "docker ps --format '{{.Names}} {{.Status}}' | grep -v 'Up'" 2>&1
 ```
 
 ### 3. Prometheus firing alerts
 ```bash
-curl -s "http://192.168.50.202:9090/api/v1/alerts" | jq '.data.alerts[] | select(.state=="firing") | {alertname: .labels.alertname, instance: .labels.instance, severity: .labels.severity}'
+ssh banner 'curl -s "http://localhost:9090/api/v1/alerts"' | jq '.data.alerts[] | select(.state=="firing") | {alertname: .labels.alertname, instance: .labels.instance, severity: .labels.severity}'
 ```
 
 ### 4. Gateway status
