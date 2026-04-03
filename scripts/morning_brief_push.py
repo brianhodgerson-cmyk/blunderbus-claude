@@ -21,7 +21,7 @@ Env vars:
   TRUENAS_API_KEY    optional — NAS health skipped if absent
 """
 
-import io, json, os, re, ssl, subprocess, sys, time, urllib.request, urllib.error
+import io, json, os, re, ssl, subprocess, sys, time, urllib.request, urllib.error, urllib.parse
 try:
     import paramiko as _paramiko
 except ImportError:
@@ -42,12 +42,15 @@ for _k, _v in read_env_file().items():
 try:
     from vault import load_secrets as _load_secrets
     _load_secrets()
-except Exception:
-    pass  # vault unavailable — fall back to env / .env values
+except Exception as _vault_err:
+    print(f"⚠️  Vault bootstrap failed: {_vault_err}", file=sys.stderr)
+    print("   Falling back to .env values only.", file=sys.stderr)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-SECONION_KEY = os.environ.get("SECONION_API_KEY", "")
+SECONION_USER = os.environ.get("SECONION_USER", "")
+SECONION_PASS = os.environ.get("SECONION_PASS", "")
+SECONION_URL  = os.environ.get("SECONION_URL", "https://soc.hodgespot.com")
 TRUENAS_KEY  = os.environ.get("TRUENAS_API_KEY", "")
 NOTE_STORE   = resolve_note_store()
 VAULT_DAILY  = NOTE_STORE.daily_dir
@@ -291,24 +294,93 @@ def collect_containers():
     return results
 
 
-def collect_security():
-    if not SECONION_KEY:
+def _soc_session():
+    """Authenticate to SecOnion via Kratos and return a session token."""
+    if not SECONION_USER or not SECONION_PASS:
         return None
-    code, body = http_get(
-        "https://192.168.50.103/api/alerts?limit=200&range=24h&sort=severity:desc",
-        headers={"Authorization": f"Bearer {SECONION_KEY}"},
-    )
-    if code != 200:
-        return None
+    ctx = ssl_ctx()
     try:
-        data   = json.loads(body)
-        alerts = data if isinstance(data, list) else data.get("data", data.get("alerts", []))
+        # Step 1: init login flow
+        req = urllib.request.Request(
+            f"{SECONION_URL}/auth/self-service/login/api",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10, context=ctx) as r:
+            flow = json.loads(r.read().decode())
+        action = flow.get("ui", {}).get("action", "")
+        if not action:
+            return None
+
+        # Step 2: submit credentials
+        payload = json.dumps({
+            "method": "password", "identifier": SECONION_USER, "password": SECONION_PASS,
+        }).encode()
+        req2 = urllib.request.Request(
+            action, data=payload,
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req2, timeout=10, context=ctx) as r:
+            return json.loads(r.read().decode()).get("session_token")
+    except Exception as e:
+        print(f"⚠️  SecOnion login failed: {e}", file=sys.stderr)
+    return None
+
+
+def collect_security():
+    """Collect SecOnion alerts via Kratos session auth → GET /api/events/."""
+    ctx = ssl_ctx()
+    session = _soc_session()
+    if not session:
+        print("⚠️  SecOnion: no session — check SECONION_USER/PASS in vault", file=sys.stderr)
+        return None
+
+    try:
+        from datetime import timezone as _tz
+        now   = datetime.now(_tz.utc)
+        begin = now - timedelta(hours=24)
+        # SOC uses Go time format '2006/01/02 3:04:05 PM' as the format specifier
+        range_str = (f"{begin.strftime('%Y/%m/%d %I:%M:%S %p')}"
+                     f" - {now.strftime('%Y/%m/%d %I:%M:%S %p')}")
+        params = urllib.parse.urlencode({
+            "query":       "tags:alert | groupby event.severity_label",
+            "range":       range_str,
+            "format":      "2006/01/02 3:04:05 PM",
+            "zone":        "America/Chicago",
+            "metricLimit": "10",
+            "eventLimit":  "25",
+        })
+        req = urllib.request.Request(
+            f"{SECONION_URL}/api/events/?{params}",
+            headers={"Authorization": f"Bearer {session}", "Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30, context=ctx) as r:
+            data = json.loads(r.read().decode())
+
+        total = data.get("totalEvents", 0)
+        if total == 0:
+            return {}  # no alerts — return empty dict (distinct from None = failure)
+
+        # Parse severity counts from the groupby metric
         counts = {}
-        for a in alerts:
-            sev = str(a.get("severity", "unknown")).upper()
-            counts[sev] = counts.get(sev, 0) + 1
+        for bucket in data.get("metrics", {}).get("groupby_0|event.severity_label", []):
+            keys = bucket.get("keys", [])
+            if keys:
+                sev = str(keys[0]).upper()
+                counts[sev] = bucket.get("value", 0)
+
+        # Also extract top rule names for the report
+        rules = {}
+        for event in data.get("events", []):
+            p = event.get("payload", {})
+            rule = p.get("rule.name", "unknown")
+            rules[rule] = rules.get(rule, 0) + 1
+        # Stash top rules for the block builder
+        collect_security._top_rules = sorted(rules.items(), key=lambda x: -x[1])[:5]
+
         return counts
-    except Exception:
+
+    except Exception as e:
+        print(f"⚠️  SecOnion API query failed: {e}", file=sys.stderr)
         return None
 
 
@@ -460,7 +532,7 @@ def build_block(today):
     # ── Security ──────────────────────────────────────────────────────────────
     if sec is None:
         lines += callout("note", "🔒 Security · 24h — No Data",
-                         ["SecOnion key not configured — add `SECONION_API_KEY` to `.env`"],
+                         ["SecOnion unreachable — check Fury connectivity or vault credentials"],
                          foldable="-") + [""]
     elif not sec:
         lines += callout("success", "🔒 Security · 24h — Clear",
@@ -469,12 +541,19 @@ def build_block(today):
     else:
         total_sec = sum(sec.values())
         has_crit  = sec.get("CRITICAL", 0) + sec.get("HIGH", 0) > 0
-        sec_type  = "danger" if has_crit else "warning"
+        sec_type  = "danger" if has_crit else "warning" if total_sec > 50 else "success"
         sec_lines = ["| Severity | Count |", "|---|---|"]
         for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
             if sev in sec:
                 icon = "🔴" if sev in ("CRITICAL","HIGH") else "🟡" if sev == "MEDIUM" else "🔵"
                 sec_lines.append(f"| {icon} **{sev}** | {sec[sev]} |")
+        # Add top rules if available
+        top_rules = getattr(collect_security, "_top_rules", [])
+        if top_rules:
+            sec_lines.append("|  |  |")
+            sec_lines.append("| **Top Rules** | **Count** |")
+            for rule, count in top_rules:
+                sec_lines.append(f"| {rule} | {count} |")
         lines += callout(sec_type, f"🔒 Security · 24h — {total_sec} Alerts", sec_lines) + [""]
 
     # ── Cameras ───────────────────────────────────────────────────────────────

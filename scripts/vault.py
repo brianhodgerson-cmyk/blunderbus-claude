@@ -13,7 +13,8 @@ Vault item → env var mapping:
   homeassistant-token  / base_url   → HA_URL
   Obsidian API         / Token      → OBSIDIAN_TOKEN
   grafana-api          / api_key    → GRAFANA_API_KEY
-  seconion-api         / api_key    → SECONION_API_KEY
+  soc.hodgespot.com    / username   → SECONION_USER
+  soc.hodgespot.com    / password   → SECONION_PASS
   seconion-api         / base_url   → SECONION_URL
   telegram-bot         / token      → TELEGRAM_BOT_TOKEN
   telegram-bot         / chat_id    → TELEGRAM_CHAT_ID
@@ -52,7 +53,8 @@ VAULT_MAP = [
     ("homeassistant-token",   "base_url", "HA_URL"),
     ("Obsidian API",          "Token",    "OBSIDIAN_TOKEN"),
     ("grafana-api",           "api_key",  "GRAFANA_TOKEN"),
-    ("seconion-api",          "api_key",  "SECONION_API_KEY"),
+    ("soc.hodgespot.com",     "username", "SECONION_USER"),
+    ("soc.hodgespot.com",     "password", "SECONION_PASS"),
     ("seconion-api",          "base_url", "SECONION_URL"),
     ("telegram-bot",          "token",    "TELEGRAM_BOT_TOKEN"),
     ("telegram-bot",          "chat_id",  "TELEGRAM_CHAT_ID"),

@@ -301,32 +301,51 @@ def detect_anomalies():
     today = date.today()
     days_in_month = 30
     day_of_month = today.day
-    pace_factor = days_in_month / day_of_month  # annualize to full month
+    early_month = day_of_month < 7
 
     for cat, amounts in cat_history.items():
         if len(amounts) < 2:
             continue
         mean = sum(amounts) / len(amounts)
-        variance = sum((x - mean) ** 2 for x in amounts) / len(amounts)
-        stdev = variance ** 0.5
-        if stdev == 0:
-            continue
-
         current_spend = current.get(cat, 0)
-        projected = current_spend * pace_factor
-        z = (projected - mean) / stdev
 
-        if z >= ANOMALY_ZSCORE_THRESHOLD:
-            anomalies.append({
-                "category":    cat,
-                "current":     current_spend,
-                "projected":   round(projected),
-                "avg":         round(mean),
-                "z_score":     round(z, 1),
-                "severity":    "HIGH" if z >= 3 else "MEDIUM",
-            })
+        if early_month:
+            # Before day 7: only flag categories where actual spend already
+            # exceeds the full-month average — a real signal, not a projection.
+            if mean > 0 and current_spend > mean:
+                pct_over = round((current_spend / mean - 1) * 100)
+                anomalies.append({
+                    "category":    cat,
+                    "current":     current_spend,
+                    "projected":   None,
+                    "avg":         round(mean),
+                    "z_score":     None,
+                    "pct_over":    pct_over,
+                    "severity":    "HIGH" if current_spend > mean * 2 else "MEDIUM",
+                    "anomaly_type": "exceeded",
+                })
+        else:
+            # After day 7: use projected extrapolation + z-score as before.
+            variance = sum((x - mean) ** 2 for x in amounts) / len(amounts)
+            stdev = variance ** 0.5
+            if stdev == 0:
+                continue
+            pace_factor = days_in_month / day_of_month
+            projected = current_spend * pace_factor
+            z = (projected - mean) / stdev
+            if z >= ANOMALY_ZSCORE_THRESHOLD:
+                anomalies.append({
+                    "category":    cat,
+                    "current":     current_spend,
+                    "projected":   round(projected),
+                    "avg":         round(mean),
+                    "z_score":     round(z, 1),
+                    "pct_over":    None,
+                    "severity":    "HIGH" if z >= 3 else "MEDIUM",
+                    "anomaly_type": "projected",
+                })
 
-    anomalies.sort(key=lambda x: x["z_score"], reverse=True)
+    anomalies.sort(key=lambda x: (x["z_score"] or 0, x.get("pct_over") or 0), reverse=True)
     return anomalies
 
 
@@ -338,6 +357,24 @@ def budget_pace_alert(monthly_summaries, current_month):
     avg_monthly_spend = sum(m["spending"] for m in monthly_summaries) / len(monthly_summaries)
     days_elapsed = current_month.get("days_elapsed", 15)
     days_in_month = 30
+
+    # Early-month guard: linear projection is unreliable before day 7 because
+    # lumpy bills (rent, utilities, dentist) dominate and skew the extrapolation.
+    # Before day 7, report actual spend vs the pro-rated average instead.
+    MIN_DAYS_FOR_PROJECTION = 7
+    if days_elapsed < MIN_DAYS_FOR_PROJECTION:
+        prorated_avg = avg_monthly_spend * (days_elapsed / days_in_month)
+        pct_of_avg = (current_month["spending"] / prorated_avg * 100) if prorated_avg > 0 else 0
+        return {
+            "current_spend":    current_month["spending"],
+            "projected_spend":  None,  # too early to project
+            "avg_spend":        round(avg_monthly_spend),
+            "prorated_avg":     round(prorated_avg),
+            "pct_of_avg":       round(pct_of_avg, 1),
+            "days_elapsed":     days_elapsed,
+            "status":           "EARLY",
+        }
+
     pace_factor = days_in_month / max(days_elapsed, 1)
     projected = current_month["spending"] * pace_factor
     pct_of_avg = projected / avg_monthly_spend * 100 if avg_monthly_spend > 0 else 0
@@ -371,7 +408,10 @@ def generate_narrative(balances, monthly_summaries, fire, anomalies, top_cats):
     anomaly_text = ""
     if anomalies:
         for a in anomalies:
-            anomaly_text += f"  {a['category']}: ${a['current']:,.0f} so far → projected ${a['projected']:,.0f} vs avg ${a['avg']:,.0f} ({a['severity']})\n"
+            if a.get("anomaly_type") == "exceeded":
+                anomaly_text += f"  {a['category']}: ${a['current']:,.0f} already spent — exceeds monthly avg ${a['avg']:,.0f} ({a['severity']})\n"
+            else:
+                anomaly_text += f"  {a['category']}: ${a['current']:,.0f} so far → projected ${a['projected']:,.0f} vs avg ${a['avg']:,.0f} ({a['severity']})\n"
     else:
         anomaly_text = "  None detected."
 
@@ -556,36 +596,70 @@ def build_finance_note(balances, monthly_summaries, fire, anomalies, pace, narra
 
     # ── Budget Pace ───────────────────────────────────────────────────────────
     if pace:
-        pace_icons = {"OVER": "🔴", "WATCH": "🟡", "OK": "🟢"}
-        pace_types = {"OVER": "danger", "WATCH": "warning", "OK": "success"}
-        p_icon  = pace_icons.get(pace["status"], "⬜")
-        p_ctype = pace_types.get(pace["status"], "note")
-        p_pct   = pace["pct_of_avg"]
-        pace_lines = [
-            f"| | |",
-            f"|---|---|",
-            f"| Spent so far | **${pace['current_spend']:,.0f}** ({pace['days_elapsed']}d elapsed) |",
-            f"| Projected full month | **${pace['projected_spend']:,.0f}** |",
-            f"| 3-month average | **${pace['avg_spend']:,.0f}** |",
-            f"| Pace vs average | {p_icon} **{p_pct:.0f}%** |",
-        ]
-        lines += _fin_callout(p_ctype, f"{p_icon} Budget Pace — {p_pct:.0f}% of average", pace_lines, foldable="-") + [""]
+        if pace["status"] == "EARLY":
+            # Early month — show actual vs pro-rated average, no wild projections
+            p_pct = pace["pct_of_avg"]
+            p_icon = "🔴" if p_pct > 150 else "🟡" if p_pct > 110 else "🟢"
+            p_ctype = "danger" if p_pct > 150 else "warning" if p_pct > 110 else "success"
+            pace_lines = [
+                f"| | |",
+                f"|---|---|",
+                f"| Spent so far | **${pace['current_spend']:,.0f}** ({pace['days_elapsed']}d elapsed) |",
+                f"| Pro-rated avg ({pace['days_elapsed']}d) | **${pace['prorated_avg']:,.0f}** |",
+                f"| 3-month average | **${pace['avg_spend']:,.0f}/mo** |",
+                f"| Pace vs pro-rated | {p_icon} **{p_pct:.0f}%** |",
+            ]
+            lines += _fin_callout(p_ctype, f"📊 Budget Pace — early month ({pace['days_elapsed']}d)", pace_lines, foldable="-") + [""]
+        else:
+            pace_icons = {"OVER": "🔴", "WATCH": "🟡", "OK": "🟢"}
+            pace_types = {"OVER": "danger", "WATCH": "warning", "OK": "success"}
+            p_icon  = pace_icons.get(pace["status"], "⬜")
+            p_ctype = pace_types.get(pace["status"], "note")
+            p_pct   = pace["pct_of_avg"]
+            pace_lines = [
+                f"| | |",
+                f"|---|---|",
+                f"| Spent so far | **${pace['current_spend']:,.0f}** ({pace['days_elapsed']}d elapsed) |",
+                f"| Projected full month | **${pace['projected_spend']:,.0f}** |",
+                f"| 3-month average | **${pace['avg_spend']:,.0f}** |",
+                f"| Pace vs average | {p_icon} **{p_pct:.0f}%** |",
+            ]
+            lines += _fin_callout(p_ctype, f"{p_icon} Budget Pace — {p_pct:.0f}% of average", pace_lines, foldable="-") + [""]
 
     # ── Spending Anomalies ────────────────────────────────────────────────────
     if anomalies:
+        has_exceeded = any(a.get("anomaly_type") == "exceeded" for a in anomalies)
         high_count = sum(1 for a in anomalies if a["severity"] == "HIGH")
         anom_ctype = "danger" if high_count > 0 else "warning"
-        anom_lines = [
-            "| Category | Now | Projected | vs Avg | Status |",
-            "|---|---|---|---|---|",
-        ]
-        for a in anomalies:
-            icon = "🔴" if a["severity"] == "HIGH" else "🟡"
-            diff_pct = round((a["projected"] / a["avg"] - 1) * 100) if a["avg"] else 0
-            anom_lines.append(
-                f"| **{a['category']}** | ${a['current']:,.0f} | ${a['projected']:,.0f} | +{diff_pct}% | {icon} {a['severity']} |"
-            )
-        lines += _fin_callout(anom_ctype, f"⚠️ Spending Anomalies — {len(anomalies)} Categories High", anom_lines) + [""]
+
+        if has_exceeded:
+            # Early-month: actual spend already exceeded monthly average
+            anom_lines = [
+                "| Category | Spent | Monthly Avg | Over By | Status |",
+                "|---|---|---|---|---|",
+            ]
+            for a in anomalies:
+                icon = "🔴" if a["severity"] == "HIGH" else "🟡"
+                pct_over = a.get("pct_over", 0)
+                anom_lines.append(
+                    f"| **{a['category']}** | ${a['current']:,.0f} | ${a['avg']:,.0f} | +{pct_over}% | {icon} {a['severity']} |"
+                )
+            title = f"⚠️ Already Over Budget — {len(anomalies)} Categories Exceeded Monthly Avg"
+        else:
+            # Normal month: projected extrapolation
+            anom_lines = [
+                "| Category | Now | Projected | vs Avg | Status |",
+                "|---|---|---|---|---|",
+            ]
+            for a in anomalies:
+                icon = "🔴" if a["severity"] == "HIGH" else "🟡"
+                diff_pct = round((a["projected"] / a["avg"] - 1) * 100) if a["avg"] else 0
+                anom_lines.append(
+                    f"| **{a['category']}** | ${a['current']:,.0f} | ${a['projected']:,.0f} | +{diff_pct}% | {icon} {a['severity']} |"
+                )
+            title = f"⚠️ Spending Anomalies — {len(anomalies)} Categories High"
+
+        lines += _fin_callout(anom_ctype, title, anom_lines) + [""]
     else:
         lines += _fin_callout("success", "✅ Spending — All Categories Normal", ["No anomalies detected this month."], foldable="-") + [""]
 
@@ -630,9 +704,14 @@ def print_morning_brief(balances, monthly_summaries, fire, pace, anomalies, curr
               f"({current_month['days_elapsed']} days)")
 
     if pace:
-        status_icon = {"OVER": "🔴", "WATCH": "🟡", "OK": "🟢"}.get(pace["status"], "⬜")
-        print(f"  Pace: {status_icon} projected ${pace['projected_spend']:,.0f} "
-              f"vs avg ${pace['avg_spend']:,.0f} ({pace['pct_of_avg']:.0f}%)")
+        if pace["status"] == "EARLY":
+            print(f"  Pace: 📊 early month ({pace['days_elapsed']}d) — "
+                  f"${pace['current_spend']:,.0f} spent vs "
+                  f"${pace['prorated_avg']:,.0f} pro-rated avg ({pace['pct_of_avg']:.0f}%)")
+        else:
+            status_icon = {"OVER": "🔴", "WATCH": "🟡", "OK": "🟢"}.get(pace["status"], "⬜")
+            print(f"  Pace: {status_icon} projected ${pace['projected_spend']:,.0f} "
+                  f"vs avg ${pace['avg_spend']:,.0f} ({pace['pct_of_avg']:.0f}%)")
 
     if fire:
         yr = f"{fire['years_to_fire']:.1f}" if fire["years_to_fire"] is not None else "?"
@@ -643,8 +722,12 @@ def print_morning_brief(balances, monthly_summaries, fire, pace, anomalies, curr
     if anomalies:
         print(f"\n  ⚠️  Anomalies: {len(anomalies)} category(s) trending high")
         for a in anomalies[:3]:
-            print(f"     • {a['category']}: ${a['current']:,.0f} so far "
-                  f"(proj ${a['projected']:,.0f}, avg ${a['avg']:,.0f})")
+            if a.get("anomaly_type") == "exceeded":
+                print(f"     • {a['category']}: ${a['current']:,.0f} already over "
+                      f"monthly avg ${a['avg']:,.0f} (+{a['pct_over']}%)")
+            else:
+                print(f"     • {a['category']}: ${a['current']:,.0f} so far "
+                      f"(proj ${a['projected']:,.0f}, avg ${a['avg']:,.0f})")
 
     print("\n" + "═" * 60 + "\n")
 
@@ -721,11 +804,15 @@ def main():
 
     # ── Anomaly detail printout ──────────────────────────────────────────────
     if anomalies:
-        print("  SPENDING ANOMALIES (current month, pace-projected):")
+        print("  SPENDING ANOMALIES:")
         for a in anomalies:
-            print(f"    [{a['severity']:6}] {a['category']:<25} "
-                  f"${a['current']:>7,.0f} now → ${a['projected']:>7,.0f} projected "
-                  f"(avg ${a['avg']:>7,.0f}, z={a['z_score']})")
+            if a.get("anomaly_type") == "exceeded":
+                print(f"    [{a['severity']:6}] {a['category']:<25} "
+                      f"${a['current']:>7,.0f} spent — exceeds avg ${a['avg']:>7,.0f}/mo (+{a['pct_over']}%)")
+            else:
+                print(f"    [{a['severity']:6}] {a['category']:<25} "
+                      f"${a['current']:>7,.0f} now → ${a['projected']:>7,.0f} projected "
+                      f"(avg ${a['avg']:>7,.0f}, z={a['z_score']})")
         print()
     else:
         print("  No spending anomalies detected.\n")
@@ -764,11 +851,18 @@ def main():
 
         for a in anomalies:
             if a["severity"] == "HIGH":
-                alerts.append(
-                    f"⚠️ *Spending Spike: {a['category']}*\n"
-                    f"${a['current']:,.0f} so far → projected ${a['projected']:,.0f} "
-                    f"vs avg ${a['avg']:,.0f} (z={a['z_score']})"
-                )
+                if a.get("anomaly_type") == "exceeded":
+                    alerts.append(
+                        f"⚠️ *Over Budget: {a['category']}*\n"
+                        f"Already spent *${a['current']:,.0f}* — "
+                        f"monthly avg is ${a['avg']:,.0f} (+{a['pct_over']}% over)"
+                    )
+                else:
+                    alerts.append(
+                        f"⚠️ *Spending Spike: {a['category']}*\n"
+                        f"${a['current']:,.0f} so far → projected ${a['projected']:,.0f} "
+                        f"vs avg ${a['avg']:,.0f} (z={a['z_score']})"
+                    )
 
         if alerts:
             for msg in alerts:
