@@ -1,7 +1,7 @@
 ---
 name: project-ops
 description: Git operations, task tracking, documentation management, and general project workflow support for BlunderBus development.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_read, mcp__obsidian__obsidian_write, mcp__obsidian__obsidian_append, mcp__obsidian__obsidian_search
 ---
 
 # Project Ops — Git, Tasks, Docs

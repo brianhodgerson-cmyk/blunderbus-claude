@@ -1,13 +1,16 @@
 ---
 name: security-triage
 description: Security triage across SecOnion IDS alerts and pfSense firewall logs. Use when investigating threats, checking for intrusions, or reviewing security posture.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_append
 ---
 
 # Security Triage
 
 ## What This Does
 Queries Security Onion for IDS/IPS alerts and pfSense for firewall events. Correlates findings into a prioritized security summary.
+
+## Obsidian Integration
+After formatting the security summary, offer to append to today's daily note under the Infrastructure heading. If `--save` is passed, append automatically.
 
 **IMPORTANT**: SecOnion (192.168.50.103) is READ-ONLY. Never attempt writes.
 

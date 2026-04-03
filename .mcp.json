@@ -7,6 +7,10 @@
     "grafana": {
       "command": "python",
       "args": ["scripts/start-grafana-mcp.py"]
+    },
+    "obsidian": {
+      "command": "python",
+      "args": ["C:\\Users\\brian\\Desktop\\blunderbus-claude\\mcp-servers\\obsidian\\start.py"]
     }
   }
 }

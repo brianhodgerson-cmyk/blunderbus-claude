@@ -1,7 +1,7 @@
 ---
 name: morning-brief
 description: Generate a daily morning briefing aggregating infrastructure health, security events, camera detections, and system alerts from the past 24 hours.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_read, mcp__obsidian__obsidian_append, mcp__obsidian__obsidian_search
 ---
 
 # Morning Brief — Daily Infrastructure Summary
@@ -10,6 +10,31 @@ allowed-tools: Bash
 
 ## What This Does
 Compiles an executive summary of the last 24 hours across all HodgeSpot systems. Designed to be run as a scheduled task in Claude Code Desktop.
+
+## Obsidian Integration
+
+**Before collecting data**, read today's daily note to understand what's already populated:
+```
+obsidian_read("Daily/YYYY-MM-DD.md")   # use today's date
+```
+
+Check which sections already have content (Health, Infrastructure, Finance). Skip sections that are already populated unless the user explicitly asks to refresh.
+
+**After generating the report**, append the Infrastructure section to today's daily note:
+```
+obsidian_append(
+    path="Daily/YYYY-MM-DD.md",
+    content="<the formatted infrastructure block>",
+    heading="Infrastructure"
+)
+```
+
+If the daily note doesn't exist yet, create it first using the template format:
+```
+obsidian_write("Daily/YYYY-MM-DD.md", "<full daily note template with Infrastructure filled in>")
+```
+
+Always confirm to the user what was written and which sections were updated.
 
 ## How To Schedule
 In Claude Code Desktop, set up as a scheduled task:

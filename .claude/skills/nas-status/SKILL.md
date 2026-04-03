@@ -1,13 +1,16 @@
 ---
 name: nas-status
 description: Check TrueNAS storage health — ZFS pool status, dataset usage, snapshots, disk health, and replication status.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_append
 ---
 
 # NAS Status — TrueNAS
 
 ## What This Does
 Queries TrueNAS at 192.168.50.50 for storage pool health, dataset usage, snapshot inventory, and disk SMART status.
+
+## Obsidian Integration
+After formatting results, offer to append to today's daily note under the Infrastructure heading. If `--save` is passed, append automatically.
 
 ## How To Run
 

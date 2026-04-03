@@ -1,13 +1,16 @@
 ---
 name: camera-events
 description: Query Frigate NVR for camera events, detections, recording status, and camera health. Use for security footage review and motion detection analysis.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_append
 ---
 
 # Camera Events — Frigate NVR
 
 ## What This Does
 Queries Frigate NVR at 192.168.50.205:5000 for detection events, camera status, and recording availability.
+
+## Obsidian Integration
+After formatting results, offer to append to today's daily note under the Infrastructure heading. If `--save` is passed, append automatically.
 
 ## How To Run
 

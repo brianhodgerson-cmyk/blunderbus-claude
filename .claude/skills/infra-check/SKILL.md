@@ -1,7 +1,7 @@
 ---
 name: infra-check
 description: Check VM health across the cluster — CPU, memory, disk, uptime, and load averages via SSH.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_read, mcp__obsidian__obsidian_append, mcp__obsidian__obsidian_write
 ---
 
 # Infra Check — VM Health via SSH
@@ -10,6 +10,20 @@ allowed-tools: Bash
 
 ## What This Does
 SSH into each VM to check system resources: uptime, CPU load, memory usage, and disk space.
+
+## Obsidian Integration
+
+After collecting and formatting the health table, offer to write results to today's daily note:
+
+```
+obsidian_append(
+    path="Daily/YYYY-MM-DD.md",
+    content="<formatted infra health table>",
+    heading="Infrastructure"
+)
+```
+
+If the user passes `--save` or asks to save/log the results, append automatically without prompting.
 
 ## How To Run
 

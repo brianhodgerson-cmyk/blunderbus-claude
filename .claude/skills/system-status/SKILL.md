@@ -1,7 +1,7 @@
 ---
 name: system-status
 description: Full topology sweep of all HodgeSpot VMs and services. Shows host reachability, Docker container status, and service health across the entire cluster.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_read, mcp__obsidian__obsidian_append, mcp__obsidian__obsidian_write
 ---
 
 # System Status — Full Topology Sweep
@@ -10,6 +10,20 @@ allowed-tools: Bash
 
 ## What This Does
 Checks every VM and service in the HodgeSpot cluster for reachability and health.
+
+## Obsidian Integration
+
+After completing the sweep, offer to write the topology status to today's daily note:
+
+```
+obsidian_append(
+    path="Daily/YYYY-MM-DD.md",
+    content="<formatted topology table>",
+    heading="Infrastructure"
+)
+```
+
+If the user passes `--save` or asks to save/log the results, append automatically without prompting.
 
 ## How To Run
 

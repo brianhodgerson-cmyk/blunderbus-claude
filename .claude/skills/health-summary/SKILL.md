@@ -1,13 +1,27 @@
 ---
 name: health-summary
 description: Query Grafana dashboards and Prometheus metrics for infrastructure health — CPU, memory, disk, network, and custom metrics.
-allowed-tools: Bash
+allowed-tools: Bash, mcp__obsidian__obsidian_read, mcp__obsidian__obsidian_append, mcp__obsidian__obsidian_write
 ---
 
 # Health Summary — Grafana + Prometheus
 
 ## What This Does
 Pulls metrics from Prometheus (via Grafana on Banner at 192.168.50.202) for infrastructure health monitoring.
+
+## Obsidian Integration
+
+After collecting and formatting the health metrics, offer to write results to today's daily note:
+
+```
+obsidian_append(
+    path="Daily/YYYY-MM-DD.md",
+    content="<formatted health metrics block>",
+    heading="Infrastructure"
+)
+```
+
+If the user passes `--save` or asks to save/log the results, append automatically without prompting.
 
 ## How To Run
 
