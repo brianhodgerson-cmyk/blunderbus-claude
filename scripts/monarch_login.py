@@ -1,12 +1,17 @@
 """
-One-time interactive login to Monarch Money.
-Run this manually in a terminal to authenticate and save a session file.
-Subsequent automated scripts use the saved session — no re-login needed.
+One-time login to Monarch Money. Saves a session file that all
+automated scripts reuse — no re-login needed until session expires.
 
 Usage:
-    py scripts/monarch_login.py
+    py scripts/monarch_login.py                  # interactive (TTY) — prompts for MFA code
+    py scripts/monarch_login.py --mfa-code 123456 # non-interactive — supply code from CLI
+
+Two-phase non-interactive flow (cron-friendly):
+    1. Run with no args → Monarch sends the email code, script exits with MFA_REQUIRED.
+    2. Run again with --mfa-code <code> → completes auth and saves the session.
 """
 
+import argparse
 import asyncio
 import os
 import sys
@@ -23,6 +28,10 @@ SESSION_FILE = Path(__file__).parent.parent / ".monarch_session"
 
 
 async def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mfa-code", help="MFA code from email (skips interactive prompt)")
+    args = parser.parse_args()
+
     email = os.environ.get("MONARCH_USER")
     password = os.environ.get("MONARCH_PASS")
 
@@ -37,8 +46,15 @@ async def main():
     try:
         await mm.login(email, password, use_saved_session=False)
     except RequireMFAException:
-        print("\nMonarch sent a verification code to your email.")
-        code = input("Enter code: ").strip()
+        if args.mfa_code:
+            code = args.mfa_code.strip()
+        elif sys.stdin.isatty():
+            print("\nMonarch sent a verification code to your email.")
+            code = input("Enter code: ").strip()
+        else:
+            print("\nMFA_REQUIRED: Monarch sent a verification code to your email.")
+            print("Re-run with: py scripts/monarch_login.py --mfa-code <code>")
+            sys.exit(2)
         await mm.multi_factor_authenticate(email, password, code)
         mm.save_session(str(SESSION_FILE))
 

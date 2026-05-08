@@ -7,8 +7,12 @@ them to the finance database on Cortex (jarvis-clickhouse).
 Usage:
     py scripts/monarch_ingest.py [--days 30]
 
+Auth precedence:
+    1. Saved session file (.monarch_session at repo root) — written by monarch_login.py
+    2. MONARCH_TOKEN env var (legacy fallback)
+
 Environment (from .env):
-    MONARCH_TOKEN       - Monarch Money auth token (from Vault)
+    MONARCH_TOKEN       - Monarch Money auth token (legacy; prefer session file)
     CLICKHOUSE_HOST     - Clickhouse host (default: 192.168.50.106)
     CLICKHOUSE_USER     - Clickhouse user (default: clickhouse)
     CLICKHOUSE_PASSWORD - Clickhouse password
@@ -19,6 +23,9 @@ import asyncio
 import os
 import sys
 from datetime import date, datetime, timedelta
+from pathlib import Path
+
+SESSION_FILE = Path(__file__).parent.parent / ".monarch_session"
 
 from runtime import configure_utf8_stdio, env_first
 
@@ -131,12 +138,18 @@ def upsert_budgets(ch, budget_data: list, month: date):
 
 async def run(days: int):
     token = os.environ.get("MONARCH_TOKEN")
-    if not token:
-        print("ERROR: MONARCH_TOKEN not set")
-        sys.exit(1)
 
-    print("Connecting to Monarch Money...")
-    mm = MonarchMoney(token=token, timeout=120)
+    if SESSION_FILE.exists():
+        print(f"Connecting to Monarch Money (session: {SESSION_FILE.name})...")
+        mm = MonarchMoney(session_file=str(SESSION_FILE), timeout=120)
+        mm.load_session(str(SESSION_FILE))
+    elif token:
+        print("Connecting to Monarch Money (MONARCH_TOKEN)...")
+        mm = MonarchMoney(token=token, timeout=120)
+    else:
+        print(f"ERROR: no auth available — neither {SESSION_FILE} exists nor MONARCH_TOKEN is set.")
+        print("       Run: py scripts/monarch_login.py")
+        sys.exit(1)
 
     print("Connecting to Clickhouse...")
     ch = get_ch_client()

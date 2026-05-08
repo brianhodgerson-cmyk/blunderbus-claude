@@ -24,6 +24,9 @@ Vault item → env var mapping:
   adguard-api          / base_url   → ADGUARD_HOST
   loki-endpoint        / base_url   → LOKI_URL
   monarch              / api_token  → MONARCH_TOKEN
+  monarch              / username   → MONARCH_USER
+  monarch              / password   → MONARCH_PASS
+  jarvis-postgres      / password   → BLUNDERBUS_DB_PASSWORD
 
 Non-vault (stays in .env):
   BW_MASTER_PASS, PFSENSE_*, MQTT_*, PORTAINER_*, NPM_*,
@@ -64,6 +67,11 @@ VAULT_MAP = [
     ("adguard-api",           "base_url", "ADGUARD_HOST"),
     ("loki-endpoint",         "base_url", "LOKI_URL"),
     ("monarch",               "api_token","MONARCH_TOKEN"),
+    ("monarch",               "username", "MONARCH_USER"),
+    ("monarch",               "password", "MONARCH_PASS"),
+    # Login-type item — vault.py reads `login.password` when field_name is "password"
+    # and the item has no custom field of that name.
+    ("jarvis-postgres",       "password", "BLUNDERBUS_DB_PASSWORD"),
 ]
 
 
