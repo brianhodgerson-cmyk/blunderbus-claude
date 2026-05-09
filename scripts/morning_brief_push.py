@@ -27,6 +27,7 @@ try:
 except ImportError:
     _paramiko = None
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from blunderbus_data import get_life_events_for_day, log_life_event
 from note_store import NoteStoreError, resolve_note_store
@@ -66,6 +67,7 @@ HOSTS = [
     ("Heimdall", "truenas"),   # SSH alias is 'truenas', not 'heimdall'
     ("Vision",   "vision"),
     ("Loki",     "loki"),
+    ("ProfX",    "__local__"), # this host — collect_vm_health special-cases it
 ]
 DOCKER_HOSTS = [("Cortex", "cortex"), ("Stark", "stark")]
 SSH_FLAGS    = ["-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
@@ -80,6 +82,7 @@ ROLES = {
     "Heimdall": "TrueNAS",
     "Vision":   "MCP Server",
     "Loki":     "Log Agg.",
+    "ProfX":    "BlunderBus brain",
 }
 
 
@@ -260,9 +263,35 @@ def callout(ctype, title, lines, foldable="+"):
 
 # ─── Collectors ───────────────────────────────────────────────────────────────
 
+def _local_vm_stats():
+    """Probe this host directly (no SSH). Used for ProfX since the brief runs here."""
+    try:
+        with open("/proc/loadavg") as fh:
+            load = fh.read().split()[0]
+    except Exception:
+        load = "?"
+    try:
+        out = subprocess.run(["free", "-m"], capture_output=True, text=True, timeout=5).stdout
+        mem_line = next(l for l in out.splitlines() if l.startswith("Mem:"))
+        parts = mem_line.split()
+        mem = f"{parts[2]}M/{parts[1]}M"
+    except Exception:
+        mem = "—"
+    try:
+        out = subprocess.run(["df", "-h", "/"], capture_output=True, text=True, timeout=5).stdout
+        disk = out.splitlines()[1].split()[4]
+    except Exception:
+        disk = "—"
+    return load, mem, disk
+
+
 def collect_vm_health():
     rows = []
     for label, alias in HOSTS:
+        if alias == "__local__":
+            load, mem, disk = _local_vm_stats()
+            rows.append((label, f"✅ {load}", mem, disk))
+            continue
         ok, _ = ssh_run(alias, "echo ok")
         if not ok:
             rows.append((label, "❌", "—", "—"))
@@ -427,6 +456,39 @@ def collect_prometheus():
 
 # ─── Block builder ────────────────────────────────────────────────────────────
 
+def load_carried_concerns(max_items: int = 5):
+    """Pull persistent items from memory/learnings.md so the morning brief opens
+    with what's already known to be broken. Returns [] if file missing/empty."""
+    learnings = Path(__file__).resolve().parent.parent / "memory" / "learnings.md"
+    if not learnings.exists():
+        return []
+    try:
+        text = learnings.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return []
+
+    # Pull the "Active concerns" section
+    m = re.search(r"^## Active concerns.*?$(.*?)(?=^## |\Z)", text, flags=re.MULTILINE | re.DOTALL)
+    if not m:
+        return []
+
+    out = []
+    # Each item starts with "- 🔴 **category** — sample" then a metadata line.
+    # We collapse to a short, daily-brief-friendly one-liner.
+    item_re = re.compile(
+        r"-\s+(🔴|🟡|🆕|✅)\s+\*\*([^*]+)\*\*\s+—\s+(.*?)\s*\n\s+_seen\s+(\d+)×.*?last\s+(\d{4}-\d{2}-\d{2})",
+        re.DOTALL,
+    )
+    for icon, category, sample, count, last_seen in item_re.findall(m.group(1)):
+        # Trim sample to ~80 chars and strip noisy markdown table residue
+        clean = re.sub(r"\s+", " ", sample).strip()
+        clean = re.sub(r"[~|*`]+", "", clean)[:80].strip()
+        out.append(f"{icon} **{category}** · {clean} · _{count} days, last {last_seen}_")
+        if len(out) >= max_items:
+            break
+    return out
+
+
 def build_block(today):
     now = datetime.now().strftime("%H:%M")
 
@@ -478,6 +540,11 @@ def build_block(today):
     banner = callout(cluster_type, f"{cluster_icon} HodgeSpot Cluster — {cluster_status}",
                      [" · ".join(summary_parts)], foldable="")
     lines += banner + [""]
+
+    # ── Carried concerns from memory/learnings.md ─────────────────────────────
+    carried = load_carried_concerns()
+    if carried:
+        lines += callout("warning", f"🧠 Still Open · {len(carried)} concern(s) carried", carried, foldable="-") + [""]
 
     yesterday = today - timedelta(days=1)
     recent_events = get_life_events_for_day(yesterday, limit=8)
