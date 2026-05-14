@@ -70,6 +70,16 @@ INCOME_CAT  = "category IN ('Paychecks', 'Other Income')"
 FIXED_CAT   = "category IN ('Mortgage', 'Gas & Electric', 'Insurance', 'Phone', 'Internet & Cable', 'Garbage')"
 ESSENTIAL   = "category IN ('Groceries', 'Gas', 'Medical')"
 
+# Source-of-truth view for all spending/income aggregation. The view dedupes by
+# (date, merchant, abs(amount), account_id) signature — collapsing the Monarch
+# re-ID problem where the overnight ingest occasionally re-pulls the same
+# transaction with a fresh id (sequential, +1, OR a re-issued id ~10^14 apart).
+# argMax(..., inserted_at) inside the view picks the most-recently-curated
+# row per signature so Monarch's latest category wins. Do NOT query
+# `finance.transactions FINAL` directly for aggregates — use TRANS_SRC.
+# Per memory/finance/learnings.md "Systemic data-quality fixes (2026-05-14)".
+TRANS_SRC   = "finance.transactions_deduped"
+
 # FIRE assumptions
 ANNUAL_INVESTMENT_RETURN = 0.07   # 7% real return
 SAFE_WITHDRAWAL_RATE     = 0.04   # 4% SWR
@@ -134,7 +144,7 @@ def get_monthly_summary(months=3):
             -- strictly before the current calendar month.
             SELECT toStartOfMonth(date + INTERVAL 5 DAY) AS month,
                    round(sum(amount)) AS income
-            FROM finance.transactions FINAL
+            FROM {TRANS_SRC}
             WHERE {INCOME_CAT}
               AND date >= today() - {months * 31 + 5}
               AND toStartOfMonth(date + INTERVAL 5 DAY) < toStartOfMonth(today())
@@ -143,7 +153,7 @@ def get_monthly_summary(months=3):
         spd AS (
             SELECT toStartOfMonth(date) AS month,
                    round(abs(sum(amount))) AS spending
-            FROM finance.transactions FINAL
+            FROM {TRANS_SRC}
             WHERE amount < 0 AND {EXCL}
               AND date >= today() - {months * 31}
               AND toStartOfMonth(date) < toStartOfMonth(today())
@@ -179,7 +189,7 @@ def get_current_month():
             round(abs(sum(if(amount < 0 AND {EXCL} AND date >= toStartOfMonth(today()),
                              amount, 0))))                             AS spending,
             today() - toStartOfMonth(today()) + 1                     AS days_elapsed
-        FROM finance.transactions FINAL
+        FROM {TRANS_SRC}
         WHERE date >= toStartOfMonth(today()) - INTERVAL 5 DAY
     """)
     return rows[0] if rows else {}
@@ -223,7 +233,7 @@ def get_trailing_30():
             round(sum(if({INCOME_CAT}, amount, 0)))                       AS income,
             round(abs(sum(if(amount < 0 AND {EXCL}, amount, 0))))          AS spending,
             30                                                            AS window_days
-        FROM finance.transactions FINAL
+        FROM {TRANS_SRC}
         WHERE date >= today() - INTERVAL 30 DAY
           AND date <= today()
     """)
@@ -272,7 +282,7 @@ def detect_paydate_skew(month_start=None):
         SELECT
             countIf(category='Paychecks' AND merchant ILIKE '%nike%') AS nike_count,
             groupArray(if(category='Paychecks' AND merchant ILIKE '%defense%', toDayOfMonth(date), NULL)) AS dfas_days
-        FROM finance.transactions FINAL
+        FROM {TRANS_SRC}
         WHERE date >= toDate('{month_start.isoformat()}')
           AND date <  toDate('{next_month.isoformat()}')
           AND amount > 0
@@ -298,7 +308,7 @@ def get_top_categories(days=30):
     return q(f"""
         SELECT category,
                round(abs(sum(amount))) as total
-        FROM finance.transactions FINAL
+        FROM {TRANS_SRC}
         WHERE date >= today() - {days}
           AND amount < 0
           AND {EXCL}
@@ -314,7 +324,7 @@ def get_category_history():
         SELECT category,
                toStartOfMonth(date) as month,
                round(abs(sum(amount))) as total
-        FROM finance.transactions FINAL
+        FROM {TRANS_SRC}
         WHERE date >= today() - 120
           AND amount < 0
           AND {EXCL}
@@ -509,7 +519,7 @@ def detect_anomalies():
     current_rows = q(f"""
         SELECT category,
                round(abs(sum(amount))) as total
-        FROM finance.transactions FINAL
+        FROM {TRANS_SRC}
         WHERE date >= toStartOfMonth(today())
           AND amount < 0
           AND {EXCL}
