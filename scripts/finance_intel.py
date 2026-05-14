@@ -21,7 +21,7 @@ Environment (from .env or shell):
     TELEGRAM_CHAT_ID        Telegram chat/user ID
 """
 
-import argparse, io, json, os, ssl, sys, urllib.request, urllib.error
+import argparse, io, json, os, re, ssl, sys, urllib.request, urllib.error
 from datetime import date, datetime
 from math import log
 
@@ -161,11 +161,16 @@ def get_monthly_summary(months=3):
 
 
 def get_current_month():
-    """Income/spending so far this month.
+    """Income/spending so far this month (calendar boundary).
 
     Income looks back 5 extra days before month-start so end-of-prior-month
     pay deposits (VA, DFAS) are counted in the month they represent.
     Spending still uses strict calendar-month boundaries.
+
+    NOTE: This is reported in the daily brief as the calendar-month view
+    (clearly labeled, with optional pay-date skew warning). The HEADLINE
+    savings rate is driven by `get_trailing_30()` instead — see that
+    function's docstring for the rationale.
     """
     rows = q(f"""
         SELECT
@@ -178,6 +183,115 @@ def get_current_month():
         WHERE date >= toStartOfMonth(today()) - INTERVAL 5 DAY
     """)
     return rows[0] if rows else {}
+
+
+def get_trailing_30():
+    """Income/spending over the last 30 days (rolling window).
+
+    Why this exists and why it's the HEADLINE savings-rate metric:
+
+    Brian's income lands on three independent cadences (Nike bi-weekly,
+    DFAS last-business-day, VA last-business-day) that all interact with
+    calendar-month boundaries. When the calendar boundary lands inside a
+    pay cycle, the calendar-month view can swing by $5–8K of income
+    without anything actually changing in the household's run-rate. That
+    swing is then amplified by the savings-rate ratio (smaller denominator
+    → bigger percent move).
+
+    Concrete examples we've already burned cycles on:
+      - April 2026 had 3 Nike paychecks + 1 RSU true-up + DFAS+VA on
+        Apr-30 → calendar income $24.6K is +63% over March's $16.9K, but
+        the household didn't earn 63% more.
+      - May 2026 starts with $0 calendar income on day 1 because DFAS+VA
+        for May posted on Apr-30 (last business day) — a strict calendar
+        view would show a 0% savings rate "crisis" that doesn't exist.
+
+    Trailing 30 days absorbs both: any given 30-day window almost always
+    contains 2 Nike + 1 DFAS + 1 VA, regardless of where you start. No
+    +5-day pay-date shift is needed; the rolling window does that work.
+
+    This does NOT solve lumpy spending (Mercedes payoff, federal tax
+    filing, annual Amex fee). Those are handled by the recurring.md
+    suppression list and one-time-event annotations. Trailing-30 is the
+    income-side normalization; spending-side normalization is the
+    suppression layer.
+
+    Sign + exclusion conventions match get_current_month / get_monthly_summary.
+    """
+    rows = q(f"""
+        SELECT
+            round(sum(if({INCOME_CAT}, amount, 0)))                       AS income,
+            round(abs(sum(if(amount < 0 AND {EXCL}, amount, 0))))          AS spending,
+            30                                                            AS window_days
+        FROM finance.transactions FINAL
+        WHERE date >= today() - INTERVAL 30 DAY
+          AND date <= today()
+    """)
+    row = rows[0] if rows else {}
+    if not row:
+        return {}
+    income = row.get("income", 0) or 0
+    spending = row.get("spending", 0) or 0
+    surplus = income - spending
+    savings_rate_pct = (surplus / income * 100) if income > 0 else 0.0
+    return {
+        "income":           income,
+        "spending":         spending,
+        "surplus":          surplus,
+        "savings_rate_pct": savings_rate_pct,
+        "window_days":      row.get("window_days", 30),
+    }
+
+
+def detect_paydate_skew(month_start=None):
+    """Detect whether a calendar month is distorted by pay-date timing.
+
+    Returns a dict {skewed: bool, reason: str} suitable for appending to
+    the calendar-month label in the daily brief. The brief reports
+    calendar numbers for continuity but warns when the boundary is doing
+    weird things to the income side.
+
+    Two skew conditions (per memory/finance/recurring.md `## Pay-date skew`):
+      1. Nike paycheck count in the calendar month is 3 (normal is 2;
+         26 paychecks/yr ≈ ~2 per month, with 2 months/yr having 3).
+      2. DFAS deposit lands on day 1 or within the last 2 days of the
+         calendar month — meaning it represents either the prior or next
+         month's pay, not this month's.
+    """
+    from datetime import timedelta as _td
+
+    if month_start is None:
+        month_start = date.today().replace(day=1)
+    if month_start.month == 12:
+        next_month = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        next_month = month_start.replace(month=month_start.month + 1)
+    last_day_of_month = (next_month - _td(days=1)).day
+
+    rows = q(f"""
+        SELECT
+            countIf(category='Paychecks' AND merchant ILIKE '%nike%') AS nike_count,
+            groupArray(if(category='Paychecks' AND merchant ILIKE '%defense%', toDayOfMonth(date), NULL)) AS dfas_days
+        FROM finance.transactions FINAL
+        WHERE date >= toDate('{month_start.isoformat()}')
+          AND date <  toDate('{next_month.isoformat()}')
+          AND amount > 0
+    """)
+    if not rows:
+        return {"skewed": False, "reason": ""}
+    row = rows[0]
+    nike_count = row.get("nike_count", 0) or 0
+    dfas_days = [d for d in (row.get("dfas_days") or []) if d]
+
+    reasons = []
+    if nike_count >= 3:
+        reasons.append(f"3 Nike paychecks")
+    dfas_edge = [d for d in dfas_days if d == 1 or d >= last_day_of_month - 1]
+    if dfas_edge:
+        reasons.append(f"DFAS on day {','.join(str(d) for d in dfas_edge)}")
+    if reasons:
+        return {"skewed": True, "reason": "; ".join(reasons)}
+    return {"skewed": False, "reason": ""}
 
 
 def get_top_categories(days=30):
@@ -212,7 +326,21 @@ def get_category_history():
 
 # ─── FIRE Calculator ─────────────────────────────────────────────────────────
 
-def fire_calc(balances, monthly_summaries, current_month=None):
+def fire_calc(balances, monthly_summaries, current_month=None, trailing_30=None):
+    """Compute FIRE projections.
+
+    Savings-rate semantics:
+      - If `trailing_30` is provided with positive income, its savings rate
+        becomes the HEADLINE `savings_rate_pct` returned. Rationale lives
+        in `get_trailing_30.__doc__` — short version: rolling 30-day windows
+        absorb the pay-date skew that distorts calendar-month income.
+      - The 3-month average (avg_income / avg_spending / avg_surplus) is
+        still returned and still drives the years-to-FIRE projection — those
+        long-horizon calcs are stable against pay-date skew because they
+        average over multiple months.
+      - For backward compatibility, `savings_rate_pct_3mo` is also returned
+        so callers that want the historical metric can opt in.
+    """
     if not monthly_summaries:
         return None
 
@@ -257,6 +385,15 @@ def fire_calc(balances, monthly_summaries, current_month=None):
 
     fire_year = (datetime.now().year + int(years)) if years is not None else None
 
+    savings_rate_3mo = (avg_surplus / avg_income * 100) if avg_income > 0 else 0
+    # Headline savings rate prefers trailing-30 when available (see docstring).
+    if trailing_30 and trailing_30.get("income", 0) > 0:
+        headline_savings_rate = trailing_30["savings_rate_pct"]
+        savings_rate_basis = "trailing-30"
+    else:
+        headline_savings_rate = savings_rate_3mo
+        savings_rate_basis = "3-month avg"
+
     return {
         "avg_monthly_income":   avg_income,
         "avg_monthly_spending": avg_spending,
@@ -268,16 +405,99 @@ def fire_calc(balances, monthly_summaries, current_month=None):
         "monthly_invest_est":   monthly_invest,
         "years_to_fire":        years,
         "fire_year":            fire_year,
-        "savings_rate_pct":     (avg_surplus / avg_income * 100) if avg_income > 0 else 0,
+        "savings_rate_pct":     headline_savings_rate,
+        "savings_rate_pct_3mo": savings_rate_3mo,
+        "savings_rate_basis":   savings_rate_basis,
+        "trailing_30":          trailing_30,
     }
 
 
 # ─── Spending Anomaly Detection ──────────────────────────────────────────────
 
+def load_recurring_suppressions():
+    """Read memory/finance/recurring.md and extract (month, category) pairs that
+    should be suppressed (or annotated) when flagged as anomalies. Returns a dict:
+        {(month_int, category_lower): "reason string"}
+    Only "Confirmed" + "Annual hits" tables count — "Suspected" still get flagged
+    but with a lower-severity prefix."""
+    import re as _re
+    from pathlib import Path as _Path
+    path = _Path(__file__).resolve().parent.parent / "memory" / "finance" / "recurring.md"
+    suppressions = {}
+    if not path.exists():
+        return suppressions
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return suppressions
+
+    month_map = {"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+                 "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+    today_year = date.today().year
+    today_month = date.today().month
+
+    # Parse the "Annual hits" table — recurring every year, suppress always
+    in_annual = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("## Annual hits"):
+            in_annual = True
+            continue
+        if in_annual and s.startswith("## "):
+            in_annual = False
+            continue
+        if not in_annual or not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.split("|")[1:-1]]
+        if len(cells) < 4:
+            continue
+        month, cat, amt, why = cells[0], cells[1], cells[2], cells[3]
+        if cat in ("Category", "—", "") or month in ("Month", "---", ""):
+            continue
+        m = month_map.get(month[:3])
+        if not m:
+            continue
+        if cat == "—" or amt == "—":
+            continue
+        suppressions[(m, cat.lower())] = f"{why} (~{amt})"
+
+    # Parse the "One-time explained events" table — only suppress if
+    # the period matches current YYYY-MM (so future years still flag).
+    in_onetime = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("## One-time explained events"):
+            in_onetime = True
+            continue
+        if in_onetime and s.startswith("## "):
+            in_onetime = False
+            continue
+        if not in_onetime or not s.startswith("|"):
+            continue
+        cells = [c.strip() for c in s.split("|")[1:-1]]
+        if len(cells) < 4:
+            continue
+        period, cat, amt, why = cells[0], cells[1], cells[2], cells[3]
+        if period in ("Period", "---") or cat in ("Category", "—"):
+            continue
+        # period format: YYYY-MM
+        m_period = _re.match(r"^(\d{4})-(\d{2})$", period)
+        if not m_period:
+            continue
+        yr, mo = int(m_period.group(1)), int(m_period.group(2))
+        # Only active suppression if entry's period matches current month/year
+        if yr == today_year and mo == today_month:
+            existing = suppressions.get((mo, cat.lower()), "")
+            extra = f"ONE-TIME ({period}): {why} (~{amt})"
+            suppressions[(mo, cat.lower())] = (existing + " · " + extra).strip(" ·") if existing else extra
+    return suppressions
+
+
 def detect_anomalies():
     history = get_category_history()
     if not history:
         return []
+    suppressions = load_recurring_suppressions()
 
     # Build per-category list of monthly amounts
     from collections import defaultdict
@@ -309,6 +529,8 @@ def detect_anomalies():
         mean = sum(amounts) / len(amounts)
         current_spend = current.get(cat, 0)
 
+        suppression_reason = suppressions.get((today.month, cat.lower()))
+
         if early_month:
             # Before day 7: only flag categories where actual spend already
             # exceeds the full-month average — a real signal, not a projection.
@@ -323,6 +545,8 @@ def detect_anomalies():
                     "pct_over":    pct_over,
                     "severity":    "HIGH" if current_spend > mean * 2 else "MEDIUM",
                     "anomaly_type": "exceeded",
+                    "suppressed":   bool(suppression_reason),
+                    "suppression_reason": suppression_reason,
                 })
         else:
             # After day 7: use projected extrapolation + z-score as before.
@@ -343,9 +567,16 @@ def detect_anomalies():
                     "pct_over":    None,
                     "severity":    "HIGH" if z >= 3 else "MEDIUM",
                     "anomaly_type": "projected",
+                    "suppressed":   bool(suppression_reason),
+                    "suppression_reason": suppression_reason,
                 })
 
-    anomalies.sort(key=lambda x: (x["z_score"] or 0, x.get("pct_over") or 0), reverse=True)
+    # Suppressed anomalies sink to the bottom; non-suppressed sort by severity
+    anomalies.sort(key=lambda x: (
+        x.get("suppressed", False),         # False (0) first
+        -(x["z_score"] or 0),
+        -(x.get("pct_over") or 0),
+    ))
     return anomalies
 
 
@@ -407,11 +638,21 @@ def generate_narrative(balances, monthly_summaries, fire, anomalies, top_cats):
 
     anomaly_text = ""
     if anomalies:
-        for a in anomalies:
+        real = [a for a in anomalies if not a.get("suppressed")]
+        suppressed = [a for a in anomalies if a.get("suppressed")]
+        for a in real:
             if a.get("anomaly_type") == "exceeded":
                 anomaly_text += f"  {a['category']}: ${a['current']:,.0f} already spent — exceeds monthly avg ${a['avg']:,.0f} ({a['severity']})\n"
             else:
                 anomaly_text += f"  {a['category']}: ${a['current']:,.0f} so far → projected ${a['projected']:,.0f} vs avg ${a['avg']:,.0f} ({a['severity']})\n"
+        if suppressed:
+            anomaly_text += "\n  Expected (annual/known recurring — do not flag):\n"
+            for a in suppressed:
+                anomaly_text += f"  {a['category']}: ${a['current']:,.0f} — {a['suppression_reason']}\n"
+        if not real and not suppressed:
+            anomaly_text = "  None detected."
+        elif not real:
+            anomaly_text = "  No real anomalies (all flagged categories are known recurring hits).\n" + anomaly_text
     else:
         anomaly_text = "  None detected."
 
@@ -564,13 +805,21 @@ def build_finance_note(balances, monthly_summaries, fire, anomalies, pace, narra
     if monthly_summaries:
         avg_surplus = sum(m["surplus"] for m in monthly_summaries) / len(monthly_summaries)
         months_ctype = "success" if avg_surplus > 0 else "danger"
-        months_title = f"📊 Recent Months — avg surplus ${avg_surplus:+,.0f}/mo"
-        month_lines = ["| Month | Income | Spending | Surplus |", "|---|---|---|---|"]
+        months_title = (
+            f"📊 Recent Months — avg surplus ${avg_surplus:+,.0f}/mo "
+            f"(calendar-month — includes pay-date skew when N=3 Nike paychecks "
+            f"OR DFAS lands on day 1 / last day)"
+        )
+        month_lines = ["| Month | Income | Spending | Surplus | Notes |", "|---|---|---|---|---|"]
         for m in monthly_summaries[-3:]:
             sign = "+" if m["surplus"] >= 0 else ""
             dot  = "🟢" if m["surplus"] > 0 else "🔴"
+            # Detect pay-date skew for this calendar month
+            month_start = m["month"] if isinstance(m["month"], date) else None
+            skew = detect_paydate_skew(month_start) if month_start else {"skewed": False, "reason": ""}
+            note = f"⚠️ skew: {skew['reason']}" if skew.get("skewed") else ""
             month_lines.append(
-                f"| **{m['month']}** | ${m['income']:,.0f} | ${m['spending']:,.0f} | {dot} {sign}${m['surplus']:,.0f} |"
+                f"| **{m['month']}** | ${m['income']:,.0f} | ${m['spending']:,.0f} | {dot} {sign}${m['surplus']:,.0f} | {note} |"
             )
         lines += _fin_callout(months_ctype, months_title, month_lines) + [""]
 
@@ -580,13 +829,23 @@ def build_finance_note(balances, monthly_summaries, fire, anomalies, pace, narra
         pct    = fire["progress_pct"]
         bar    = _money_bar(pct)
         sr     = fire["savings_rate_pct"]
+        basis  = fire.get("savings_rate_basis", "3-month avg")
+        sr_3mo = fire.get("savings_rate_pct_3mo", sr)
+        t30    = fire.get("trailing_30") or {}
         fire_ctype = "success" if sr >= 20 else "warning" if sr >= 10 else "danger"
         fire_lines = [
             f"{bar} **{pct:.1f}%** of ${fire['fire_number']:,.0f}",
             f"",
             f"| Metric | Value |",
             f"|---|---|",
-            f"| Savings rate | **{sr:.1f}%** |",
+            f"| **Savings rate (headline, {basis})** | **{sr:.1f}%** |",
+        ]
+        if t30:
+            fire_lines.append(
+                f"| ↳ Trailing-30 income / spend | ${t30.get('income',0):,.0f} / ${t30.get('spending',0):,.0f} |"
+            )
+        fire_lines += [
+            f"| Savings rate (3-month avg) | {sr_3mo:.1f}% |",
             f"| Investable assets | **${fire['investable_assets']:,.0f}** |",
             f"| Monthly surplus (avg) | **${fire['avg_surplus']:,.0f}** |",
             f"| Years to FIRE | **{yr}** |",
@@ -628,38 +887,72 @@ def build_finance_note(balances, monthly_summaries, fire, anomalies, pace, narra
 
     # ── Spending Anomalies ────────────────────────────────────────────────────
     if anomalies:
-        has_exceeded = any(a.get("anomaly_type") == "exceeded" for a in anomalies)
-        high_count = sum(1 for a in anomalies if a["severity"] == "HIGH")
-        anom_ctype = "danger" if high_count > 0 else "warning"
+        real_anom = [a for a in anomalies if not a.get("suppressed")]
+        suppressed_anom = [a for a in anomalies if a.get("suppressed")]
 
-        if has_exceeded:
-            # Early-month: actual spend already exceeded monthly average
-            anom_lines = [
-                "| Category | Spent | Monthly Avg | Over By | Status |",
-                "|---|---|---|---|---|",
-            ]
-            for a in anomalies:
-                icon = "🔴" if a["severity"] == "HIGH" else "🟡"
-                pct_over = a.get("pct_over", 0)
-                anom_lines.append(
-                    f"| **{a['category']}** | ${a['current']:,.0f} | ${a['avg']:,.0f} | +{pct_over}% | {icon} {a['severity']} |"
-                )
-            title = f"⚠️ Already Over Budget — {len(anomalies)} Categories Exceeded Monthly Avg"
-        else:
-            # Normal month: projected extrapolation
-            anom_lines = [
-                "| Category | Now | Projected | vs Avg | Status |",
-                "|---|---|---|---|---|",
-            ]
-            for a in anomalies:
-                icon = "🔴" if a["severity"] == "HIGH" else "🟡"
-                diff_pct = round((a["projected"] / a["avg"] - 1) * 100) if a["avg"] else 0
-                anom_lines.append(
-                    f"| **{a['category']}** | ${a['current']:,.0f} | ${a['projected']:,.0f} | +{diff_pct}% | {icon} {a['severity']} |"
-                )
-            title = f"⚠️ Spending Anomalies — {len(anomalies)} Categories High"
+        if real_anom:
+            has_exceeded = any(a.get("anomaly_type") == "exceeded" for a in real_anom)
+            high_count = sum(1 for a in real_anom if a["severity"] == "HIGH")
+            anom_ctype = "danger" if high_count > 0 else "warning"
 
-        lines += _fin_callout(anom_ctype, title, anom_lines) + [""]
+            if has_exceeded:
+                anom_lines = [
+                    "| Category | Spent | Monthly Avg | Over By | Status |",
+                    "|---|---|---|---|---|",
+                ]
+                for a in real_anom:
+                    icon = "🔴" if a["severity"] == "HIGH" else "🟡"
+                    pct_over = a.get("pct_over", 0)
+                    anom_lines.append(
+                        f"| **{a['category']}** | ${a['current']:,.0f} | ${a['avg']:,.0f} | +{pct_over}% | {icon} {a['severity']} |"
+                    )
+                title = f"⚠️ Already Over Budget — {len(real_anom)} Categories Exceeded Monthly Avg"
+            else:
+                anom_lines = [
+                    "| Category | Now | Projected | vs Avg | Status |",
+                    "|---|---|---|---|---|",
+                ]
+                for a in real_anom:
+                    icon = "🔴" if a["severity"] == "HIGH" else "🟡"
+                    diff_pct = round((a["projected"] / a["avg"] - 1) * 100) if a["avg"] else 0
+                    anom_lines.append(
+                        f"| **{a['category']}** | ${a['current']:,.0f} | ${a['projected']:,.0f} | +{diff_pct}% | {icon} {a['severity']} |"
+                    )
+                title = f"⚠️ Spending Anomalies — {len(real_anom)} Categories High"
+
+            lines += _fin_callout(anom_ctype, title, anom_lines) + [""]
+
+        if suppressed_anom:
+            sup_lines = [
+                "| Category | Spent | vs Avg | Reason |",
+                "|---|---|---|---|",
+            ]
+            for a in suppressed_anom:
+                avg = a["avg"] or 1
+                ratio = a["current"] / avg
+                # Keep the reason terse for the table — full audit trail lives in
+                # memory/finance/recurring.md and decisions.md.
+                reason = a.get("suppression_reason", "") or ""
+                # Strip "(~$X)" amount tails — they're shown in the Spent column
+                short = re.sub(r"\s*\(~?\$[\d,]+\)\s*", "", reason).strip()
+                # When both annual + one-time hit the same category, show the
+                # one-time portion (more relevant to this month's spike); annual
+                # presence is implied by the row appearing in this table.
+                m_split = re.search(r"\s*·\s*ONE-TIME\s+", short)
+                if m_split:
+                    onetime_part = short[m_split.end():]
+                    onetime_part = re.sub(r"^\(\d{4}-\d{2}\):\s*", "", onetime_part).strip()
+                    short = f"one-time event: {onetime_part}"
+                elif short.startswith("ONE-TIME "):
+                    body = re.sub(r"^ONE-TIME\s+", "", short)
+                    body = re.sub(r"^\(\d{4}-\d{2}\):\s*", "", body).strip()
+                    short = f"one-time event: {body}"
+                short = re.sub(r"\s+", " ", short)[:160]
+                sup_lines.append(
+                    f"| **{a['category']}** | ${a['current']:,.0f} | {ratio:.1f}x | _{short}_ |"
+                )
+            sup_title = f"📅 Expected (Annual / Recurring) — {len(suppressed_anom)} Suppressed"
+            lines += _fin_callout("info", sup_title, sup_lines, foldable="-") + [""]
     else:
         lines += _fin_callout("success", "✅ Spending — All Categories Normal", ["No anomalies detected this month."], foldable="-") + [""]
 
@@ -717,7 +1010,13 @@ def print_morning_brief(balances, monthly_summaries, fire, pace, anomalies, curr
         yr = f"{fire['years_to_fire']:.1f}" if fire["years_to_fire"] is not None else "?"
         print(f"\n  FIRE: {fire['progress_pct']:.1f}% of ${fire['fire_number']:,.0f} "
               f"({yr} yrs → {fire['fire_year'] or 'TBD'})")
-        print(f"  Savings rate: {fire['savings_rate_pct']:.1f}%")
+        basis = fire.get("savings_rate_basis", "3-month avg")
+        print(f"  Savings rate ({basis}): {fire['savings_rate_pct']:.1f}%")
+        if fire.get("trailing_30") and basis == "trailing-30":
+            t30 = fire["trailing_30"]
+            print(f"    ↳ trailing-30: ${t30['income']:,.0f} income / ${t30['spending']:,.0f} spend / ${t30['surplus']:+,.0f} surplus")
+        if abs(fire.get("savings_rate_pct_3mo", fire["savings_rate_pct"]) - fire["savings_rate_pct"]) > 5:
+            print(f"    (3-month avg basis was {fire.get('savings_rate_pct_3mo', 0):.1f}% — calendar-month skew detected)")
 
     if anomalies:
         print(f"\n  ⚠️  Anomalies: {len(anomalies)} category(s) trending high")
@@ -755,12 +1054,15 @@ def main():
     print("  Fetching current month ...")
     current_month = get_current_month()
 
+    print("  Fetching trailing-30 (headline savings-rate basis) ...")
+    trailing_30 = get_trailing_30()
+
     print("  Fetching top categories ...")
     top_cats = get_top_categories(days=30)
 
     # ── FIRE ─────────────────────────────────────────────────────────────────
     print("  Calculating FIRE ...")
-    fire = fire_calc(balances, monthly_summaries, current_month)
+    fire = fire_calc(balances, monthly_summaries, current_month, trailing_30=trailing_30)
 
     # ── Anomaly detection ────────────────────────────────────────────────────
     print("  Detecting anomalies ...")
