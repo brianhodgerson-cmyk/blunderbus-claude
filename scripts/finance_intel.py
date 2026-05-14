@@ -196,7 +196,7 @@ def get_current_month():
 
 
 def get_trailing_30():
-    """Income/spending over the last 30 days (rolling window).
+    """Income/spending over the last 30 days (rolling window) with lumpy detection.
 
     Why this exists and why it's the HEADLINE savings-rate metric:
 
@@ -220,14 +220,25 @@ def get_trailing_30():
     contains 2 Nike + 1 DFAS + 1 VA, regardless of where you start. No
     +5-day pay-date shift is needed; the rolling window does that work.
 
-    This does NOT solve lumpy spending (Mercedes payoff, federal tax
-    filing, annual Amex fee). Those are handled by the recurring.md
-    suppression list and one-time-event annotations. Trailing-30 is the
-    income-side normalization; spending-side normalization is the
-    suppression layer.
+    Lumpy-event exclusion (added 2026-05-14): single transactions whose
+    abs(amount) > 2× the category's 90-day P95 (excluding that very txn
+    from the P95 sample) are flagged as `lumpy_excluded`. We return BOTH
+    `savings_rate_pct` (the unaltered raw figure) AND
+    `savings_rate_pct_excl_lumpy` (the same calc with lumpy txns
+    subtracted from spending). The daily brief shows both so the operator
+    can sanity-check the adjustment.
 
+    For sparse categories with < 3 baseline txns over 90 days (e.g.
+    `Check` only fires when NFCU writes a paper check), P95 is unstable.
+    Fallback: flag as lumpy if abs(amount) >= $500 absolute floor.
+
+    This sits OPPOSITE the recurring.md suppression: recurring events are
+    *known* and *predictable* (annual Amex Plat $895, April IRS filing).
+    The lumpy filter is the algorithmic backstop — it catches large
+    one-off hits regardless of whether they're listed in recurring.md.
     Sign + exclusion conventions match get_current_month / get_monthly_summary.
     """
+    # Step 1: raw income + raw spending (unchanged behavior)
     rows = q(f"""
         SELECT
             round(sum(if({INCOME_CAT}, amount, 0)))                       AS income,
@@ -244,12 +255,137 @@ def get_trailing_30():
     spending = row.get("spending", 0) or 0
     surplus = income - spending
     savings_rate_pct = (surplus / income * 100) if income > 0 else 0.0
+
+    # Step 2: identify lumpy txns in the trailing-30 window.
+    # For each candidate txn (amount<0, EXCL, last 30d), compute 90-day P95
+    # of abs(amount) within its category EXCLUDING the candidate's own
+    # transaction id. If P95 sample size < 3, the category is too sparse
+    # for a P95 baseline — fall back to a $500 absolute floor.
+    #
+    # Recurring-merchant exemption: a txn is NOT lumpy if the same merchant
+    # has another txn in the prior 60 days within ±20% of this amount.
+    # That's the signature of a regular monthly bill (Mortgage, Clubcorp
+    # membership, etc.) and those belong in normal spending, not lumpy
+    # exclusions. This is the cheapest defense against the category-
+    # bouncing problem (Clubcorp Mar=`Country Club` → Apr=`Entertainment &
+    # Recreation`) without needing the full short-history merchant guard
+    # (which lives in detect_anomalies for category-baseline math).
+    lumpy_excluded = []
+    lumpy_total = 0.0
+    LUMPY_MULTIPLIER = 2.0
+    LUMPY_SPARSE_FLOOR = 500.0   # for categories with <3 txns over 90 days
+    LUMPY_MIN_SAMPLE = 3
+    RECURRING_TOLERANCE = 0.20   # ±20% same-merchant in prior 60d → recurring, not lumpy
+
+    candidates = q(f"""
+        SELECT id, date, merchant, abs(amount) AS amt, category
+        FROM {TRANS_SRC}
+        WHERE date >= today() - INTERVAL 30 DAY
+          AND date <= today()
+          AND amount < 0
+          AND {EXCL}
+          AND is_pending = 0
+        ORDER BY amt DESC
+    """)
+
+    # Only inspect txns that could plausibly be lumpy — anything under the
+    # sparse-floor cannot trigger via the absolute path, and anything well
+    # below typical P95 thresholds is unlikely to trigger via the multiplier
+    # path. $200 is a generous pre-filter to keep the per-txn P95 query
+    # count reasonable (typically <15 candidates in a 30-day window).
+    PREFILTER = 200.0
+    for c in candidates:
+        amt = float(c.get("amt") or 0)
+        if amt < PREFILTER:
+            continue
+        cat = c.get("category", "")
+        merchant = c.get("merchant", "") or ""
+        txn_id = c.get("id", "")
+        txn_date = c.get("date")
+        # Skip recurring same-merchant patterns (monthly bills). The
+        # predecessor must itself be in-scope spending (real outflow,
+        # not a Transfer / Credit Card Payment) — otherwise a $1,000
+        # Amex CC Payment in March would wrongly mark a $895 Financial
+        # Fees Amex annual fee in May as "recurring" and skip flagging.
+        if merchant:
+            recur_rows = q(f"""
+                SELECT count() AS n_recur
+                FROM {TRANS_SRC}
+                WHERE date >= toDate(%(d)s) - INTERVAL 60 DAY
+                  AND date <  toDate(%(d)s)
+                  AND amount < 0
+                  AND merchant = %(m)s
+                  AND id != %(txn_id)s
+                  AND abs(amount) BETWEEN %(lo)s AND %(hi)s
+                  AND {EXCL}
+                  AND is_pending = 0
+            """, {
+                "d": txn_date.isoformat() if hasattr(txn_date, "isoformat") else str(txn_date),
+                "m": merchant,
+                "txn_id": txn_id,
+                "lo": amt * (1 - RECURRING_TOLERANCE),
+                "hi": amt * (1 + RECURRING_TOLERANCE),
+            })
+            if recur_rows and int(recur_rows[0].get("n_recur") or 0) >= 1:
+                # Has a same-merchant near-amount predecessor → recurring bill
+                continue
+
+        # P95 over 90-day same-category window excluding this txn's id
+        p95_rows = q(f"""
+            SELECT round(quantile(0.95)(abs(amount)), 2) AS p95,
+                   count() AS n
+            FROM {TRANS_SRC}
+            WHERE date >= today() - INTERVAL 90 DAY
+              AND date <= today()
+              AND amount < 0
+              AND category = %(cat)s
+              AND id != %(txn_id)s
+              AND is_pending = 0
+        """, {"cat": cat, "txn_id": txn_id})
+        if not p95_rows:
+            continue
+        p95 = float(p95_rows[0].get("p95") or 0)
+        n = int(p95_rows[0].get("n") or 0)
+        date_str = txn_date.isoformat() if hasattr(txn_date, "isoformat") else str(txn_date)
+        if n >= LUMPY_MIN_SAMPLE:
+            if p95 > 0 and amt > LUMPY_MULTIPLIER * p95:
+                reason = f"abs ${amt:,.0f} > 2x 90d-P95 ${p95:,.0f} (n={n})"
+                lumpy_excluded.append({
+                    "date":     date_str,
+                    "merchant": merchant,
+                    "amount":   amt,
+                    "category": cat,
+                    "reason":   reason,
+                })
+                lumpy_total += amt
+        else:
+            # Sparse category — use absolute floor instead of P95 multiplier.
+            if amt >= LUMPY_SPARSE_FLOOR:
+                reason = f"abs ${amt:,.0f} >= ${LUMPY_SPARSE_FLOOR:,.0f} floor (sparse category, n={n} in 90d)"
+                lumpy_excluded.append({
+                    "date":     date_str,
+                    "merchant": merchant,
+                    "amount":   amt,
+                    "category": cat,
+                    "reason":   reason,
+                })
+                lumpy_total += amt
+
+    spending_excl_lumpy = max(0, spending - lumpy_total)
+    surplus_excl_lumpy = income - spending_excl_lumpy
+    sr_excl_lumpy = (surplus_excl_lumpy / income * 100) if income > 0 else 0.0
+
     return {
-        "income":           income,
-        "spending":         spending,
-        "surplus":          surplus,
-        "savings_rate_pct": savings_rate_pct,
-        "window_days":      row.get("window_days", 30),
+        "income":                       income,
+        "spending":                     spending,
+        "surplus":                      surplus,
+        "savings_rate_pct":             savings_rate_pct,
+        "spending_excl_lumpy":          spending_excl_lumpy,
+        "surplus_excl_lumpy":           surplus_excl_lumpy,
+        "savings_rate_pct_excl_lumpy":  sr_excl_lumpy,
+        "lumpy_excluded":               lumpy_excluded,
+        "lumpy_total":                  lumpy_total,
+        "window_days":                  row.get("window_days", 30),
     }
 
 
@@ -318,8 +454,144 @@ def get_top_categories(days=30):
     """)
 
 
+SHORT_HISTORY_MIN_MONTHS = 6        # baseline target — applies once data depth allows
+SHORT_HISTORY_LOOKBACK_DAYS = 365
+SHORT_HISTORY_DOMINANCE_PCT = 0.60  # a pair holding ≥60% of merchant's months is stable
+SHORT_HISTORY_SMALL_TXN_MEDIAN = 100.0  # drifting pairs with median > this are kept
+                                        # (protects recurring big-ticket items where merchant
+                                        # naming is overloaded — e.g. NFCU spans Mortgage,
+                                        # Financial Fees, Check, Cash & ATM but the $3,253
+                                        # NFCU/Mortgage is real recurring spend)
+
+
+def get_unstable_merchant_categories():
+    """Return the set of (merchant, category) pairs that should be excluded
+    from category baselines and anomaly aggregates.
+
+    A pair (M, C) is **unstable** when ALL of the following hold:
+      1. The merchant M is "drifting" — has appeared in multiple in-scope
+         categories AND no single category covers ≥60% of M's months.
+      2. The specific pair (M, C) has fewer than SHORT_HISTORY_MIN_MONTHS
+         consistent months in the data (the literal spec).
+      3. The pair's median txn amount is below
+         SHORT_HISTORY_SMALL_TXN_MEDIAN — i.e. it's a small subscription-
+         class hit, not a recurring big-ticket obligation.
+
+    The protective use-case is the OpenAI category-thrash pattern observed
+    2026-05-14:
+
+        2026-01-13  OpenAI  $20.94  Miscellaneous
+        2026-02-13  OpenAI  $20.94  Miscellaneous
+        2026-03-13  OpenAI  $20.94  Internet & Cable   ← drift starts
+        2026-04-13  OpenAI  $20.94  Internet & Cable
+        2026-05-13  OpenAI  $20.94  Miscellaneous      ← drift continues
+
+    OpenAI is in 2 categories, 50/50 split (no dominance), and the median
+    txn is $20.94 (< $100). Both OpenAI pairs flag as unstable → all
+    OpenAI rows are dropped from baseline math. Aggregating them would
+    create the fake "Internet & Cable spike" anomalies seen in March-April.
+
+    The three conditions cooperate:
+      - Dominance test (1) lets us keep stable single-category merchants
+        like Spectrum/Internet, T-Mobile/Phone, Halo Collar/Pets.
+      - Month-count test (2) is the literal spec but takes effect only
+        once data depth supports it (with <6 months of data, every pair
+        trips this and we'd lose everything if we used it alone).
+      - Median-amount test (3) protects overloaded merchant strings where
+        a big recurring obligation rides under the same name as tiny
+        side fees — NFCU = Mortgage $3,253 + ATM $23 + FinFees $1 +
+        Check $5,240. NFCU/Mortgage median is $3,253 (well > $100), so
+        the pair stays in baseline math even though NFCU is technically
+        a "drifting" merchant. The $5,240 NFCU/Check is independently
+        handled by the lumpy-event filter in get_trailing_30().
+    """
+    # Per-merchant month profile across all in-scope categories
+    merchant_rows = q(f"""
+        SELECT merchant,
+               count(DISTINCT category) AS n_cats,
+               count(DISTINCT toStartOfMonth(date)) AS total_months
+        FROM {TRANS_SRC}
+        WHERE date >= today() - {SHORT_HISTORY_LOOKBACK_DAYS}
+          AND amount < 0
+          AND {EXCL}
+          AND is_pending = 0
+          AND merchant != ''
+        GROUP BY merchant
+    """)
+    merchant_profile = {
+        r["merchant"]: (int(r.get("n_cats") or 0), int(r.get("total_months") or 0))
+        for r in merchant_rows
+    }
+
+    # Per-pair details: months in this pair, median amount
+    pair_rows = q(f"""
+        SELECT merchant,
+               category,
+               count(DISTINCT toStartOfMonth(date)) AS pair_months,
+               quantile(0.5)(abs(amount)) AS median_amt
+        FROM {TRANS_SRC}
+        WHERE date >= today() - {SHORT_HISTORY_LOOKBACK_DAYS}
+          AND amount < 0
+          AND {EXCL}
+          AND is_pending = 0
+          AND merchant != ''
+        GROUP BY merchant, category
+    """)
+
+    unstable = set()
+    for r in pair_rows:
+        m = r["merchant"]
+        c = r["category"]
+        pair_months = int(r.get("pair_months") or 0)
+        median_amt = float(r.get("median_amt") or 0)
+        n_cats, total_months = merchant_profile.get(m, (0, 0))
+
+        # Condition 1: merchant must be in multiple categories AND no
+        # category may dominate (≥60% of merchant's months).
+        if n_cats < 2:
+            continue
+        dominance = (pair_months / total_months) if total_months else 0
+        if dominance >= SHORT_HISTORY_DOMINANCE_PCT:
+            continue
+        # Condition 2: pair must have < SHORT_HISTORY_MIN_MONTHS consistent months
+        if pair_months >= SHORT_HISTORY_MIN_MONTHS:
+            continue
+        # Condition 3: median amount must be small (drifting subscription-
+        # class hit, not a recurring big-ticket obligation)
+        if median_amt >= SHORT_HISTORY_SMALL_TXN_MEDIAN:
+            continue
+        unstable.add((m, c))
+    return unstable
+
+
+def _build_unstable_excl_sql(unstable_pairs):
+    """Build a SQL fragment that excludes unstable (merchant, category)
+    pairs. Returns an empty string if no exclusions, or a clause of the
+    form ' AND NOT (m1 c1 OR m2 c2 OR ...) ' that callers can drop into
+    existing WHERE clauses.
+
+    Escapes single quotes by doubling — adequate for the merchant/category
+    text we see in practice. (clickhouse-driver param binding doesn't
+    cleanly support multi-row IN-tuples for VARCHAR pairs, so we hand-
+    build the fragment.)"""
+    if not unstable_pairs:
+        return ""
+    terms = []
+    for (m, c) in unstable_pairs:
+        m_esc = (m or "").replace("'", "''")
+        c_esc = (c or "").replace("'", "''")
+        terms.append(f"(merchant = '{m_esc}' AND category = '{c_esc}')")
+    return " AND NOT (" + " OR ".join(terms) + ")"
+
+
 def get_category_history():
-    """Per-category monthly spend for last 3 full months (for anomaly detection)."""
+    """Per-category monthly spend for last 3 full months (for anomaly detection).
+
+    Applies the short-history merchant guard (see
+    `get_unstable_merchant_categories`) so that erratic (merchant,
+    category) pairs don't pollute the historical baseline.
+    """
+    unstable_clause = _build_unstable_excl_sql(get_unstable_merchant_categories())
     return q(f"""
         SELECT category,
                toStartOfMonth(date) as month,
@@ -329,6 +601,7 @@ def get_category_history():
           AND amount < 0
           AND {EXCL}
           AND toStartOfMonth(date) < toStartOfMonth(today())
+          {unstable_clause}
         GROUP BY category, month
         ORDER BY category, month
     """)
@@ -504,6 +777,15 @@ def load_recurring_suppressions():
 
 
 def detect_anomalies():
+    # Short-history merchant guard: compute once, apply to BOTH historical
+    # baseline (via get_category_history) and current-month aggregates.
+    # Without this, a (merchant, category) pair that drifts between
+    # categories produces fake spikes — e.g. OpenAI bouncing between
+    # `Miscellaneous` and `Internet & Cable` inflated I&C in Mar+Apr
+    # then snapped back to Misc in May, falsely flagging I&C as anomalous.
+    unstable_pairs = get_unstable_merchant_categories()
+    unstable_clause = _build_unstable_excl_sql(unstable_pairs)
+
     history = get_category_history()
     if not history:
         return []
@@ -515,7 +797,8 @@ def detect_anomalies():
     for row in history:
         cat_history[row["category"]].append(row["total"])
 
-    # Get current month spend by category
+    # Get current month spend by category — apply the same unstable-pair
+    # exclusion so the current vs baseline comparison is apples-to-apples.
     current_rows = q(f"""
         SELECT category,
                round(abs(sum(amount))) as total
@@ -523,6 +806,7 @@ def detect_anomalies():
         WHERE date >= toStartOfMonth(today())
           AND amount < 0
           AND {EXCL}
+          {unstable_clause}
         GROUP BY category
     """)
     current = {r["category"]: r["total"] for r in current_rows}
@@ -854,6 +1138,20 @@ def build_finance_note(balances, monthly_summaries, fire, anomalies, pace, narra
             fire_lines.append(
                 f"| ↳ Trailing-30 income / spend | ${t30.get('income',0):,.0f} / ${t30.get('spending',0):,.0f} |"
             )
+            lumpy_list = t30.get("lumpy_excluded") or []
+            lumpy_total = t30.get("lumpy_total") or 0
+            if lumpy_list:
+                sr_x = t30.get("savings_rate_pct_excl_lumpy", sr)
+                spend_x = t30.get("spending_excl_lumpy", 0)
+                lumpy_short = " + ".join(
+                    f"{(l.get('merchant') or '?').split()[0][:14]} ${l.get('amount',0):,.0f}"
+                    for l in lumpy_list[:4]
+                )
+                if len(lumpy_list) > 4:
+                    lumpy_short += f" + {len(lumpy_list)-4} more"
+                fire_lines.append(
+                    f"| ↳ T30 SR excl lumpy ({lumpy_short}) | **{sr_x:.1f}%** (spend ${spend_x:,.0f}) |"
+                )
         fire_lines += [
             f"| Savings rate (3-month avg) | {sr_3mo:.1f}% |",
             f"| Investable assets | **${fire['investable_assets']:,.0f}** |",
@@ -1025,6 +1323,15 @@ def print_morning_brief(balances, monthly_summaries, fire, pace, anomalies, curr
         if fire.get("trailing_30") and basis == "trailing-30":
             t30 = fire["trailing_30"]
             print(f"    ↳ trailing-30: ${t30['income']:,.0f} income / ${t30['spending']:,.0f} spend / ${t30['surplus']:+,.0f} surplus")
+            lumpy_list = t30.get("lumpy_excluded") or []
+            if lumpy_list:
+                sr_x = t30.get("savings_rate_pct_excl_lumpy", 0)
+                spend_x = t30.get("spending_excl_lumpy", 0)
+                print(f"    ↳ excl lumpy ({len(lumpy_list)} txns, ${t30.get('lumpy_total',0):,.0f}): "
+                      f"spend ${spend_x:,.0f}, SR {sr_x:+.1f}%")
+                for l in lumpy_list:
+                    print(f"        • {l.get('date')} {l.get('merchant','?')[:30]:30s} "
+                          f"${l.get('amount',0):>8,.0f} [{l.get('category','?')}] — {l.get('reason','')}")
         if abs(fire.get("savings_rate_pct_3mo", fire["savings_rate_pct"]) - fire["savings_rate_pct"]) > 5:
             print(f"    (3-month avg basis was {fire.get('savings_rate_pct_3mo', 0):.1f}% — calendar-month skew detected)")
 
