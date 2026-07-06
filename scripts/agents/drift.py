@@ -55,9 +55,11 @@ EXPECTED_TIMERS = [
     "blunderbus-daily-brief.timer",
     "blunderbus-monarch-ingest.timer",
     "blunderbus-drift-sentinel.timer",
+    "blunderbus-ssh-cert-renew.timer",
 ]
 EXPECTED_SERVICES_ACTIVE = [
     "bb-mcp.service",
+    "blunderbus-dispatcher.service",
     "bbm-api.service",
     "blunderbus-couchdb-sync.service",
     "hermes-gateway.service",
