@@ -16,8 +16,6 @@ Vault item → env var mapping:
   soc.hodgespot.com    / username   → SECONION_USER
   soc.hodgespot.com    / password   → SECONION_PASS
   seconion-api         / base_url   → SECONION_URL
-  telegram-bot         / token      → TELEGRAM_BOT_TOKEN
-  telegram-bot         / chat_id    → TELEGRAM_CHAT_ID
   truenas-api          / api_key    → TRUENAS_API_KEY
   adguard-api          / username   → ADGUARD_USER
   adguard-api          / password   → ADGUARD_PASS
@@ -29,7 +27,7 @@ Vault item → env var mapping:
   jarvis-postgres      / password   → BLUNDERBUS_DB_PASSWORD
 
 Non-vault (stays in .env):
-  BW_MASTER_PASS, PFSENSE_*, MQTT_*, PORTAINER_*, NPM_*,
+  BW_MASTER_PASS, MQTT_*, PORTAINER_*, NPM_*,
   CLICKHOUSE_*, LITELLM_*, GITHUB_TOKEN, OBSIDIAN_URL
 
 Usage:
@@ -60,8 +58,6 @@ VAULT_MAP = [
     ("soc.hodgespot.com",     "username", "SECONION_USER"),
     ("soc.hodgespot.com",     "password", "SECONION_PASS"),
     ("seconion-api",          "base_url", "SECONION_URL"),
-    ("telegram-bot",          "token",    "TELEGRAM_BOT_TOKEN"),
-    ("telegram-bot",          "chat_id",  "TELEGRAM_CHAT_ID"),
     ("discord-bot",           "token",    "DISCORD_BOT_TOKEN"),
     ("discord-bot",           "guild_id", "DISCORD_GUILD_ID"),
     ("truenas-api",           "api_key",  "TRUENAS_API_KEY"),
