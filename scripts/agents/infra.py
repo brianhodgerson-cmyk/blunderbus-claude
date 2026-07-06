@@ -236,15 +236,36 @@ def _build_nas_concerns(pools) -> list[Concern]:
     for entry in pools or []:
         if isinstance(entry, tuple) and len(entry) >= 3:
             name, status, healthy = entry[0], entry[1], entry[2]
-            if not healthy or status not in ("ONLINE", "online"):
-                out.append(Concern(
-                    severity="critical",
-                    summary=f"ZFS pool {name} status={status}",
-                    category="storage",
-                    metric={"pool": name, "status": status},
-                    suggested_action="Investigate pool health on Heimdall immediately.",
-                    source="truenas",
-                ))
+            status_code = entry[3] if len(entry) > 3 else None
+            status_detail = entry[4] if len(entry) > 4 else None
+            online = status in ("ONLINE", "online")
+            if healthy and online:
+                continue
+            if not online:
+                sev = "critical"
+                summary = f"ZFS pool {name} status={status}"
+                action = "Investigate pool health on Heimdall immediately."
+            else:
+                # Middleware flags unhealthy while the pool is ONLINE (e.g.
+                # FAILING_DEV after a corrected device error). Degraded, not
+                # an outage — applications are typically unaffected.
+                sev = "high"
+                summary = (f"ZFS pool {name} flagged unhealthy "
+                           f"({status_code or 'no status_code'}) despite status={status}")
+                action = ("zpool status -v on Heimdall — if a device shows "
+                          "errors, decide zpool clear vs replace.")
+            out.append(Concern(
+                severity=sev,
+                summary=summary,
+                detail=(status_detail or ""),
+                category="storage",
+                # kind → stable concern id; host → concern target
+                metric={"pool": name, "status": status,
+                        "status_code": status_code,
+                        "kind": f"zfs-pool-{name}", "host": "heimdall"},
+                suggested_action=action,
+                source="truenas",
+            ))
     return out
 
 

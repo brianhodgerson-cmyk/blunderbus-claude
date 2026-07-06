@@ -532,7 +532,8 @@ def collect_nas():
     if code != 200:
         return None
     try:
-        return [(p["name"], p["status"], p.get("healthy", False)) for p in json.loads(body)]
+        return [(p["name"], p["status"], p.get("healthy", False),
+                 p.get("status_code"), p.get("status_detail")) for p in json.loads(body)]
     except Exception:
         return None
 
