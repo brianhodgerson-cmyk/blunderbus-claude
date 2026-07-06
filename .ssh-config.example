@@ -111,3 +111,10 @@ Host hawkeye-nvr
   ConnectTimeout 5
   StrictHostKeyChecking accept-new
   PreferredAuthentications publickey
+
+Host mercury
+  HostName 192.168.50.109
+  User root
+  ConnectTimeout 5
+  StrictHostKeyChecking accept-new
+  PreferredAuthentications publickey

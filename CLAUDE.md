@@ -24,13 +24,13 @@ All VMs run on Proxmox node `Multiverse`.
 
 | VM | Host | IP | SSH Alias | SSH User | Status | Role |
 |----|------|----|-----------|----------|--------|------|
-| — | Thor | 192.168.50.136 | `thor` | `brian` | running | Workstation / Ollama (`qwen3:14b`), RTX 4080 GPU |
+| 101 | Thor | 192.168.50.136 | `thor` | `brian` | stopped (verified 2026-07-06) | Workstation / Ollama (`qwen3:14b`), RTX 4080 GPU |
 | 100 | Heimdall | 192.168.50.50 | `heimdall` (`truenas` legacy) | `truenas_admin` | running | TrueNAS SCALE — NAS storage, ZFS pools, PCIe passthrough |
-| 102 | Jarvis | 192.168.50.206 | `homeassistant` | `root` | running | Home Assistant (SSH via Terminal & SSH add-on) |
-| 103 | Fury | 192.168.50.103 | `fury` | `brian` | running | IDS/IPS (SecOnion) |
-| 104 | Stark | 192.168.50.204 | `stark` | `blunderbus` | running | NPM, Open WebUI, Mosquitto MQTT, Portainer |
+| 102 | Jarvis | 192.168.50.206 | `homeassistant` | `root` | running | Home Assistant (SSH via Terminal & SSH add-on; AI-Workstation key NOT yet in addon config — add via UI) |
+| 103 | Fury | 192.168.50.103 | `fury` | `brian` | stopped (verified 2026-07-06) | IDS/IPS (SecOnion) |
+| 104 | Stark | 192.168.50.204 | `stark` | `blunderbus` | running | NPM, Open WebUI, Mosquitto MQTT, Portainer. QEMU guest agent available (`qm guest exec 104`) |
 | 105 | hawkeye | unknown | — | — | stopped | — |
-| 106 | Cortex | 192.168.50.106 | `cortex` | `root` | running | Docker stack: postgres, redis, litellm, langfuse, minio, clickhouse, mcp-gateway, pixel-dashboard. **ProxyJump through Stark** (direct SSH blocked by network issue) |
+| 106 | Cortex | 192.168.50.106 | `cortex` | `root` | running | Docker stack: postgres, redis, litellm, langfuse, minio, clickhouse, mcp-gateway, pixel-dashboard. **ProxyJump through Stark** |
 | 109 | AI-Workstation | 192.168.50.208 | local / `ai-workstation` | `brian` | running | Current BlunderBus/Hermes runner, RTX 4080 passthrough, Stream Deck, local STT, desktop Hermes |
 
 ### Containers (LXC)
@@ -43,7 +43,7 @@ LXC containers are minimal Debian — **SSH user is always `root`**. No non-root
 | 202 | Banner | 192.168.50.202 | `banner` | running | Grafana (`:3000`), Prometheus, InfluxDB |
 | 205 | Hawkeye | 192.168.50.205 | `hawkeye-nvr` | running | Frigate NVR (`:5000`) |
 | 207 | Loki | 192.168.50.207 | `loki` | running | Loki log aggregation (`:3100`) |
-| 209 | Ultron | 192.168.50.209 | `ultron` | running | Utility / SSH bastion (minimal services) |
+| 108 | Mercury | 192.168.50.109 | `mercury` | running | Russ's TLS workspace (memory-architecture tenant); user `russ` exists |
 | 210 | Vision | 192.168.50.210 | `vision` | running | BlunderBus Ops UI (Next.js `:3030`), MCP server (`:8788`), vision_server (`:8787`), Frigate MQTT bridge |
 | 107 | ProfX | 192.168.50.57 | `profx` | intentionally stopped/decommissioned | Former BlunderBus brain/job runner. Runtime/scheduling migrated to AI-Workstation; do not treat ProfX down as an incident. Keep as cold archive/reference only. |
 
@@ -117,7 +117,7 @@ ssh root@192.168.50.106 'docker ps'    # DON'T DO THIS
 ssh brian@192.168.50.50 'zpool status'  # DON'T DO THIS
 ```
 
-Available aliases: `proxmox`, `cortex`, `stark`, `banner`, `heimdall`, `truenas` (legacy), `thor`, `homeassistant`, `fury`, `groot`, `loki`, `ultron`, `vision`, `hawkeye-nvr`, `profx`. Treat `profx` as decommissioned/cold unless Brian explicitly asks to inspect it.
+Available aliases: `proxmox`, `cortex`, `stark`, `banner`, `heimdall`, `truenas` (legacy), `thor`, `homeassistant`, `fury`, `groot`, `loki`, `mercury`, `vision`, `hawkeye-nvr`, `profx`. Ultron (LXC 209) no longer exists — removed 2026-07-06. Treat `profx` as decommissioned/cold unless Brian explicitly asks to inspect it.
 
 Use `ssh thor` for remote workstation access. Only run commands locally when the task is explicitly local to the current shell session.
 
