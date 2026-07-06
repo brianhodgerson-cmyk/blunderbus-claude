@@ -48,7 +48,8 @@ from runtime import configure_utf8_stdio, read_env_file
 
 configure_utf8_stdio()
 
-BW_BIN = "bw"
+_PINNED_BW = "/home/brian/.local/bin/bw-vaultwarden-2024"
+BW_BIN = os.environ.get("BW_BIN") or (_PINNED_BW if os.path.exists(_PINNED_BW) else "bw")
 
 # (vault_item_name, field_name, env_var_name)
 VAULT_MAP = [
@@ -61,6 +62,8 @@ VAULT_MAP = [
     ("seconion-api",          "base_url", "SECONION_URL"),
     ("telegram-bot",          "token",    "TELEGRAM_BOT_TOKEN"),
     ("telegram-bot",          "chat_id",  "TELEGRAM_CHAT_ID"),
+    ("discord-bot",           "token",    "DISCORD_BOT_TOKEN"),
+    ("discord-bot",           "guild_id", "DISCORD_GUILD_ID"),
     ("truenas-api",           "api_key",  "TRUENAS_API_KEY"),
     ("adguard-api",           "username", "ADGUARD_USER"),
     ("adguard-api",           "password", "ADGUARD_PASS"),
@@ -69,10 +72,48 @@ VAULT_MAP = [
     ("monarch",               "api_token","MONARCH_TOKEN"),
     ("monarch",               "username", "MONARCH_USER"),
     ("monarch",               "password", "MONARCH_PASS"),
+    ("monarch",               "session_id",            "MONARCH_SESSION_ID"),
+    ("monarch",               "csrftoken",             "MONARCH_CSRFTOKEN"),
+    ("monarch",               "device_uuid",           "MONARCH_DEVICE_UUID"),
+    ("monarch",               "session_refreshed_at",  "MONARCH_SESSION_REFRESHED_AT"),
     # Login-type item — vault.py reads `login.password` when field_name is "password"
     # and the item has no custom field of that name.
     ("jarvis-postgres",       "password", "BLUNDERBUS_DB_PASSWORD"),
 ]
+
+
+def _ensure_logged_in():
+    """If bw CLI is unauthenticated, log in using BW_LOGIN_EMAIL + BW_MASTER_PASS.
+
+    Returns True when bw is logged in (locked or unlocked); False if login failed
+    or master pass is unavailable. Idempotent — safe to call when already logged in.
+    """
+    status = subprocess.run(
+        [BW_BIN, "status"], capture_output=True, text=True, timeout=10,
+    )
+    if status.returncode == 0:
+        try:
+            if json.loads(status.stdout).get("status") != "unauthenticated":
+                return True
+        except Exception:
+            pass
+
+    master = os.environ.get("BW_MASTER_PASS", "")
+    if not master:
+        return False
+    email = (
+        os.environ.get("BW_LOGIN_EMAIL")
+        or os.environ.get("BW_EMAIL")
+        or os.environ.get("BITWARDEN_EMAIL")
+        or os.environ.get("User")
+        or "jarvis@hodgespot.com"
+    )
+    r = subprocess.run(
+        [BW_BIN, "login", email, "--passwordenv", "BW_MASTER_PASS", "--raw"],
+        capture_output=True, text=True, timeout=30,
+        env={**os.environ, "BW_MASTER_PASS": master},
+    )
+    return r.returncode == 0
 
 
 def _unlock():
@@ -81,6 +122,8 @@ def _unlock():
         return os.environ["BW_SESSION"]
     master = os.environ.get("BW_MASTER_PASS", "")
     if not master:
+        return None
+    if not _ensure_logged_in():
         return None
     r = subprocess.run(
         [BW_BIN, "unlock", "--passwordenv", "BW_MASTER_PASS", "--raw"],
@@ -171,9 +214,14 @@ def load_secrets(verbose=False):
 if __name__ == "__main__":
     import argparse, re
 
-    # Load .env so BW_MASTER_PASS is available
-    for key, value in read_env_file().items():
-        os.environ.setdefault(key, value)
+    # Load .env so BW_MASTER_PASS is available.  Prefer Hermes profile env for
+    # Vaultwarden login identity, then project-local env for legacy runtime vars.
+    for env_path in ("/home/brian/.hermes/.env", None):
+        try:
+            for key, value in read_env_file(env_path).items() if env_path else read_env_file().items():
+                os.environ.setdefault(key, value)
+        except Exception:
+            pass
 
     parser = argparse.ArgumentParser(description="BlunderBus Vaultwarden loader")
     parser.add_argument("--export", action="store_true",

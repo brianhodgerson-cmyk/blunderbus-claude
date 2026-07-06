@@ -1,70 +1,84 @@
 ---
 name: infra-check
-description: Check VM health across the cluster — CPU, memory, disk, uptime, and load averages via SSH.
-allowed-tools: Bash, mcp__obsidian__obsidian_read, mcp__obsidian__obsidian_append, mcp__obsidian__obsidian_write
+description: Check VM health across the cluster - CPU, memory, uptime, and status. Uses Proxmox MCP as primary source. SSH only for per-VM disk usage or process drill-down when requested.
+allowed-tools: Bash, mcp__blunderbus__blunderbus_proxmox
 ---
 
-# Infra Check — VM Health via SSH
-
-> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+# Infra Check - VM Health
 
 ## What This Does
-SSH into each VM to check system resources: uptime, CPU load, memory usage, and disk space.
+Checks all VMs on Multiverse via the Proxmox MCP (one call, no SSH, no credentials). CPU%, RAM%, uptime, and status for all 13 VMs instantly. Falls back to SSH only for disk space or process inspection on a specific host.
 
-## Obsidian Integration
+## Primary: Proxmox MCP
 
-After collecting and formatting the health table, offer to write results to today's daily note:
-
+### Full cluster sweep
 ```
-obsidian_append(
-    path="Daily/YYYY-MM-DD.md",
-    content="<formatted infra health table>",
-    heading="Infrastructure"
-)
+action: list_vms
 ```
 
-If the user passes `--save` or asks to save/log the results, append automatically without prompting.
+Returns for each VM: vmid, name, type, status, cpu (0–1 fraction), mem/maxmem (bytes), uptime (seconds).
 
-## How To Run
+Compute for display:
+- CPU%: `cpu * 100` → round to 1 decimal
+- RAM%: `(mem / maxmem) * 100` → round to 1 decimal
+- Uptime: convert seconds → `Xd Xh`
 
-### Quick health check on a single host
+### Single VM status
+```
+action: get_vm_status
+vmid: <VMID>
+```
+
+### Snapshots on a VM
+```
+action: list_snapshots
+vmid: <VMID>
+```
+
+## Secondary: SSH (only for disk/process drill-down)
+
+Disk usage on a specific VM:
 ```bash
-ssh <ALIAS> "echo '--- Uptime ---' && uptime && echo '--- Memory ---' && free -h && echo '--- Disk ---' && df -h / && echo '--- Load ---' && cat /proc/loadavg"
+ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new <HOST_ALIAS> \
+  "df -h / | tail -1"
 ```
 
-### Sweep all VMs
+Top CPU processes:
 ```bash
-for host in cortex stark banner truenas homeassistant loki; do
-  echo "=== $host ==="
-  ssh "$host" "uptime && free -h | grep Mem && df -h / | tail -1" 2>&1 || echo "❌ Unreachable"
-  echo ""
-done
-# Thor (192.168.50.136) is the local workstation — run commands locally, not over SSH
-echo "=== thor (local) ==="
-uptime && free -h | grep Mem && df -h / | tail -1
+ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new <HOST_ALIAS> \
+  "ps aux --sort=-%cpu | head -5"
 ```
 
-### Check specific metrics
-
-**Top processes by CPU:**
+Disk I/O:
 ```bash
-ssh <ALIAS> "ps aux --sort=-%cpu | head -10"
+ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new <HOST_ALIAS> \
+  "iostat -x 1 2 2>/dev/null || cat /proc/diskstats | head -20"
 ```
 
-**Top processes by memory:**
-```bash
-ssh <ALIAS> "ps aux --sort=-%mem | head -10"
-```
+## Thresholds
 
-**Disk I/O:**
-```bash
-ssh <ALIAS> "iostat -x 1 3 2>/dev/null || cat /proc/diskstats"
-```
+| Metric | ⚠️ Warn | ❌ Critical |
+|--------|---------|------------|
+| CPU% | > 80% | > 95% |
+| RAM% | > 85% | > 95% |
+| Status | — | != running (except VM 105, expected stopped) |
 
 ## Report Format
-| Host | Uptime | Load (1/5/15) | Memory Used | Disk Used | Status |
-|------|--------|---------------|-------------|-----------|--------|
-| Cortex | ... | ... | ... | ... | ✅/⚠️/❌ |
 
-Flag ⚠️ if: load > CPU count, memory > 85%, disk > 90%.
-Flag ❌ if: unreachable or disk > 95%.
+| VM | Host | Type | Status | CPU% | RAM% | Uptime |
+|----|------|------|--------|------|------|--------|
+| 100 | Heimdall | qemu | ✅ running | 0.3% | 99% | 22h |
+| 101 | Thor | qemu | ✅ running | 10.1% | 99% | 22h |
+| 102 | Jarvis | qemu | ✅ running | 0.7% | 67% | 22h |
+| 103 | Fury | qemu | ✅ running | 3.3% | 94% | 22h |
+| 104 | Stark | qemu | ✅ running | 1.3% | 91% | 13h |
+| 105 | hawkeye | qemu | ⚠️ stopped | — | — | — |
+| 106 | Cortex | qemu | ✅ running | 3.0% | 33% | 13h |
+| 200 | Groot | lxc | ✅ running | 0.0% | 29% | 22h |
+| 202 | Banner | lxc | ✅ running | 0.1% | 24% | 22h |
+| 205 | Hawkeye | lxc | ✅ running | 0.0% | 2% | 22h |
+| 207 | Loki | lxc | ✅ running | 0.1% | 8% | 22h |
+| 209 | Ultron | lxc | ✅ running | 0.0% | 1% | 22h |
+| 210 | Vision | lxc | ✅ running | 4.8% | 7% | 22h |
+
+Note: Heimdall and Thor RAM% will show ~99% — normal, Proxmox reports all allocated RAM as used for these VMs.

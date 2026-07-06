@@ -34,7 +34,7 @@ Host homeassistant
 
 Host fury
   HostName 192.168.50.103
-  User brian
+  User admin
   ConnectTimeout 5
   StrictHostKeyChecking accept-new
   PreferredAuthentications publickey

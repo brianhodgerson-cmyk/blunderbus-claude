@@ -1,15 +1,15 @@
 ---
-description: Systems that must never be modified
-paths:
-  - "**/seconion/**"
-  - "**/fury/**"
+description: Operational guidance for production systems
 ---
 
-# Read-Only Systems
+# Production System Guidance
 
-**Fury / Security Onion (VM 103 — 192.168.50.103)** is the IDS/IPS sensor.
+Treat all production hosts with care. Confirm destructive operations before executing.
+There are no per-host write restrictions in BlunderBus — Fury (SecOnion) was previously
+read-only but is now a normal operational target as of 2026-05-01.
 
-- ONLY read operations: API queries, log retrieval, alert listing.
-- NEVER execute write commands: no config changes, no rule modifications, no service restarts.
-- NEVER SSH with write intent. Use `so-elasticsearch-query` or the API for data retrieval.
-- If an investigation requires changes to SecOnion, escalate to the operator.
+## Always requires confirmation
+- Service restarts that affect availability (`so-restart`, `systemctl restart` on critical daemons, `docker compose down`)
+- Destructive resets (`so-wipe`, drop database, truncate, `rm -rf`)
+- Changes to network capture interfaces, firewall rules, or routing
+- Disabling sensors, monitoring, or any visibility-providing service entirely

@@ -21,7 +21,7 @@ Env vars:
   TRUENAS_API_KEY    optional — NAS health skipped if absent
 """
 
-import io, json, os, re, ssl, subprocess, sys, time, urllib.request, urllib.error, urllib.parse
+import io, json, os, re, socket, ssl, subprocess, sys, time, urllib.request, urllib.error, urllib.parse
 try:
     import paramiko as _paramiko
 except ImportError:
@@ -62,16 +62,32 @@ PLACEHOLDER  = "*pending - BlunderBus will populate at 06:30*"
 HOSTS = [
     ("Cortex",   "cortex"),
     ("Stark",    "stark"),
-    ("Thor",     "thor"),
+    ("Thor",     "__prom_windows__"),  # Windows workstation — Prometheus windows_exporter, no SSH
     ("Banner",   "banner"),
     ("Heimdall", "truenas"),   # SSH alias is 'truenas', not 'heimdall'
     ("Vision",   "vision"),
     ("Loki",     "loki"),
-    ("ProfX",    "__local__"), # this host — collect_vm_health special-cases it
+    # ProfX was intentionally decommissioned as the BlunderBus brain/job runner
+    # after migration to AI-Workstation. Do not include it in daily liveness.
 ]
 DOCKER_HOSTS = [("Cortex", "cortex"), ("Stark", "stark")]
 SSH_FLAGS    = ["-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
                 "-o", "BatchMode=yes"]
+
+# Fallback liveness checks for AI-Workstation/local-Hermes runs where the full
+# BlunderBus SSH alias set is not installed.  A host with its primary service
+# reachable should not be reported "offline" just because SSH keying/aliases are
+# unavailable from the collector runtime.
+SERVICE_PORTS = {
+    "Cortex": [("192.168.50.106", 9000)],          # ClickHouse native
+    "Stark": [("192.168.50.204", 81)],             # Nginx Proxy Manager
+    "Banner": [("192.168.50.202", 3000), ("192.168.50.202", 9090)],
+    "Heimdall": [("192.168.50.50", 80)],           # TrueNAS UI redirects OK
+    "Vision": [("192.168.50.210", 3030), ("192.168.50.210", 8788)],
+    "Loki": [("192.168.50.207", 3100)],
+}
+
+DOCKER_QEMU_VMIDS = {"Stark": 104, "Cortex": 106}
 
 # Host roles for display
 ROLES = {
@@ -82,7 +98,7 @@ ROLES = {
     "Heimdall": "TrueNAS",
     "Vision":   "MCP Server",
     "Loki":     "Log Agg.",
-    "ProfX":    "BlunderBus brain",
+
 }
 
 
@@ -171,6 +187,40 @@ def http_get(url, headers=None, timeout=8):
         return None, str(e)
 
 
+def tcp_open(host, port, timeout=3):
+    """Tiny dependency-free service liveness probe."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def service_reachable(label):
+    """Return True if a host's primary non-SSH service is reachable."""
+    return any(tcp_open(host, port) for host, port in SERVICE_PORTS.get(label, []))
+
+
+def proxmox_qm_guest_exec(vmid, *args, timeout=20):
+    """Run a command through the Proxmox QEMU guest agent.
+
+    This is a fallback for collector runtimes that can reach Proxmox but do not
+    have direct SSH keys/aliases into Cortex/Stark. Returns (ok, stdout_or_err).
+    """
+    try:
+        cmd = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "proxmox",
+               "qm", "guest", "exec", str(vmid), "--", *args]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if r.returncode != 0:
+            return False, (r.stderr or r.stdout).strip()
+        data = json.loads(r.stdout)
+        if data.get("exitcode") != 0:
+            return False, data.get("err-data") or data.get("out-data") or str(data)
+        return True, data.get("out-data", "")
+    except Exception as e:
+        return False, str(e)
+
+
 def obs_get(path):
     rel_path = path.removeprefix("/vault/").lstrip("/")
     try:
@@ -236,7 +286,14 @@ def load_fmt(load_str):
 
 
 def parse_mem_pct(s):
-    """Parse '3720M/16005M' → int percent."""
+    """Parse '3720M/16005M' OR '48%' → int percent."""
+    if not s:
+        return None
+    if s.endswith("%"):
+        try:
+            return int(s.replace("%", ""))
+        except Exception:
+            return None
     try:
         used, total = s.replace("M", "").split("/")
         return round(int(used) / int(total) * 100)
@@ -285,6 +342,28 @@ def _local_vm_stats():
     return load, mem, disk
 
 
+def _prom_windows_stats():
+    """Probe Thor via Prometheus windows_exporter. Returns (load, mem, disk) or (?, —, —) on failure."""
+    def _q(promql):
+        url = "http://192.168.50.202:9090/api/v1/query?query=" + urllib.parse.quote(promql)
+        code, body = http_get(url)
+        if code != 200:
+            return None
+        try:
+            data = json.loads(body).get("data", {}).get("result", [])
+            return round(float(data[0]["value"][1])) if data else None
+        except Exception:
+            return None
+    try:
+        mem_pct  = _q('(1 - windows_memory_available_bytes{host="thor"} / windows_cs_physical_memory_bytes{host="thor"}) * 100')
+        disk_pct = _q('100 - (windows_logical_disk_free_bytes{volume="C:",host="thor"} * 100 / windows_logical_disk_size_bytes{volume="C:",host="thor"})')
+        mem_str  = f"{mem_pct}%" if mem_pct is not None else "—"
+        disk_str = f"{disk_pct}%" if disk_pct is not None else "—"
+        return "—", mem_str, disk_str
+    except Exception:
+        return "?", "—", "—"
+
+
 def collect_vm_health():
     rows = []
     for label, alias in HOSTS:
@@ -292,9 +371,19 @@ def collect_vm_health():
             load, mem, disk = _local_vm_stats()
             rows.append((label, f"✅ {load}", mem, disk))
             continue
+        if alias == "__prom_windows__":
+            load, mem, disk = _prom_windows_stats()
+            if mem == "—" and disk == "—" and not tcp_open("192.168.50.136", 11434):
+                rows.append((label, "❌", "—", "—"))
+            else:
+                rows.append((label, f"✅ {load}", mem, disk))
+            continue
         ok, _ = ssh_run(alias, "echo ok")
         if not ok:
-            rows.append((label, "❌", "—", "—"))
+            if service_reachable(label):
+                rows.append((label, "✅ service", "—", "—"))
+            else:
+                rows.append((label, "❌", "—", "—"))
             continue
         _, load  = ssh_run(alias, "uptime | awk -F'load average:' '{print $2}' | awk '{print $1}' | tr -d ','")
         _, mem   = ssh_run(alias, "free -m | awk '/Mem:/{printf \"%dM/%dM\", $3, $2}'")
@@ -307,6 +396,11 @@ def collect_containers():
     results = {}
     for label, alias in DOCKER_HOSTS:
         ok, out = ssh_run(alias, "docker ps --format '{{.Names}}:{{.Status}}' 2>/dev/null")
+        if not ok and label in DOCKER_QEMU_VMIDS:
+            ok, out = proxmox_qm_guest_exec(
+                DOCKER_QEMU_VMIDS[label],
+                "docker", "ps", "--format", "{{.Names}}:{{.Status}}",
+            )
         if not ok:
             results[label] = None
             continue

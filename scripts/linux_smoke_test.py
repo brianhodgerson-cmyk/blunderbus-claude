@@ -24,7 +24,7 @@ def main() -> None:
         os.environ["TELEGRAM_ALLOWED_USER_IDS"] = "1"
 
         note_store = importlib.import_module("note_store")
-        morning_prep = importlib.import_module("morning_prep")
+        note_template = importlib.import_module("note_template")
         telegram_bot = importlib.import_module("telegram_bot")
 
         store = note_store.resolve_note_store()
@@ -45,18 +45,16 @@ tags: [daily]
 """
         store.write_daily(yesterday, yesterday_note)
 
-        note = morning_prep.build_note(
+        note = note_template.build_note_shell(
             today,
-            [("Carry this task", yesterday, 1)],
-            ["- 9:00 AM - Smoke test event"],
-            ["Ship the backend", "Verify the pipeline", "Review the note output"],
+            [{"summary": "Smoke test event", "start": "2026-03-28T09:00:00-05:00"}],
+            ["Carry this task"],
         )
         store.write_daily(today, note)
 
         current = store.read_daily(today)
         assert "Carry this task" in current
         assert "Smoke test event" in current
-        assert "Ship the backend" in current
 
         finance_block = "*Smoke test finance block*\n"
         updated = note_store.upsert_section(current, "## Finance", finance_block)

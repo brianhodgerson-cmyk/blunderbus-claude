@@ -10,7 +10,7 @@
     },
     "obsidian": {
       "command": "python",
-      "args": ["C:\\Users\\brian\\Desktop\\blunderbus-claude\\mcp-servers\\obsidian\\start.py"]
+      "args": ["mcp-servers/obsidian/start.py"]
     }
   }
 }

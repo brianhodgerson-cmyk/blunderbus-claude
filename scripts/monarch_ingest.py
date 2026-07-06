@@ -5,7 +5,7 @@ Pulls account balances and transactions from Monarch Money and writes
 them to the finance database on Cortex (jarvis-clickhouse).
 
 Usage:
-    py scripts/monarch_ingest.py [--days 30]
+    py scripts/monarch_ingest.py [--days 30] [--include-budgets]
 
 Auth precedence:
     1. Saved session file (.monarch_session at repo root) — written by monarch_login.py
@@ -54,7 +54,10 @@ def get_ch_client():
     )
 
 
-def upsert_accounts(ch, accounts: list):
+def upsert_accounts(ch, accounts: list, *, dry_run: bool = False):
+    if dry_run:
+        print(f"  [DRY RUN] Would write {len(accounts)} account snapshot row(s)")
+        return
     # Wipe today's snapshot first so re-runs don't accumulate duplicates
     ch.execute("ALTER TABLE accounts DELETE WHERE snapshot_date = today()")
     today = date.today()
@@ -265,7 +268,7 @@ def _mm_from_cookies(session_id: str, csrftoken: str, device_uuid: str | None = 
     return mm
 
 
-async def run(days: int, *, dry_run: bool = False):
+async def run(days: int, *, dry_run: bool = False, include_budgets: bool = False):
     sid       = os.environ.get("MONARCH_SESSION_ID")
     csrf      = os.environ.get("MONARCH_CSRFTOKEN")
     dev_uuid  = os.environ.get("MONARCH_DEVICE_UUID")
@@ -296,7 +299,7 @@ async def run(days: int, *, dry_run: bool = False):
     print("\n[1/3] Pulling account balances...")
     acct_data = await mm.get_accounts()
     accounts = acct_data.get("accounts", [])
-    upsert_accounts(ch, accounts)
+    upsert_accounts(ch, accounts, dry_run=dry_run)
 
     # Net worth summary
     assets = sum(a.get("currentBalance", 0) or 0 for a in accounts if (a.get("currentBalance") or 0) > 0)
@@ -324,27 +327,33 @@ async def run(days: int, *, dry_run: bool = False):
     upsert_transactions(ch, all_transactions, dry_run=dry_run)
 
     # --- Budget vs Actual ---
-    print("\n[3/3] Pulling budget data...")
-    today = date.today()
-    try:
-        budget_data = await mm.get_budgets(
-            start_date=today.replace(day=1).isoformat(),
-            end_date=today.isoformat(),
-        )
-        budget_rows = []
-        for item in budget_data.get("budgets", []):
-            cat = item.get("category") or {}
-            budget_rows.append({
-                "category": cat.get("name", "") if isinstance(cat, dict) else str(cat),
-                "budgeted": item.get("plannedAmount") or 0,
-                "actual": item.get("actualAmount") or 0,
-            })
-        if dry_run:
-            print(f"  [DRY RUN] Would write {len(budget_rows)} budget rows")
-        else:
-            upsert_budgets(ch, budget_rows, today)
-    except Exception as e:
-        print(f"  Budget pull skipped: {e}")
+    # Monarch's budget GraphQL endpoint is currently flaky while accounts and
+    # transactions work. Keep budgets opt-in so a budget-side 500/processing
+    # error does not block the finance ingest path.
+    if include_budgets:
+        print("\n[3/3] Pulling budget data...")
+        today = date.today()
+        try:
+            budget_data = await mm.get_budgets(
+                start_date=today.replace(day=1).isoformat(),
+                end_date=today.isoformat(),
+            )
+            budget_rows = []
+            for item in budget_data.get("budgets", []):
+                cat = item.get("category") or {}
+                budget_rows.append({
+                    "category": cat.get("name", "") if isinstance(cat, dict) else str(cat),
+                    "budgeted": item.get("plannedAmount") or 0,
+                    "actual": item.get("actualAmount") or 0,
+                })
+            if dry_run:
+                print(f"  [DRY RUN] Would write {len(budget_rows)} budget rows")
+            else:
+                upsert_budgets(ch, budget_rows, today)
+        except Exception as e:
+            print(f"  Budget pull skipped: {e}")
+    else:
+        print("\n[3/3] Budget pull skipped (default; pass --include-budgets to enable).")
 
     if dry_run:
         print("\n[DRY RUN] Skipping OPTIMIZE TABLE.")
@@ -362,5 +371,7 @@ if __name__ == "__main__":
     parser.add_argument("--dry-run", action="store_true",
                         help="Fetch and analyze but don't write to ClickHouse "
                              "(useful for validating the dedup logic)")
+    parser.add_argument("--include-budgets", action="store_true",
+                        help="Also pull/write budget data (disabled by default because Monarch's budget GraphQL endpoint is flaky)")
     args = parser.parse_args()
-    asyncio.run(run(args.days, dry_run=args.dry_run))
+    asyncio.run(run(args.days, dry_run=args.dry_run, include_budgets=args.include_budgets))

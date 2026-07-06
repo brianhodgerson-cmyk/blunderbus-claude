@@ -9,6 +9,8 @@ allowed-tools: Bash
 ## What This Does
 Interfaces with AdGuard Home for DNS query logs, filtering statistics, and protection management across the HodgeSpot domain.
 
+**Endpoint:** plain HTTP on `http://192.168.50.53:80` (Groot, VM 200). HTTPS and `:3000` do NOT answer (verified 2026-07-06). `$ADGUARD_HOST` should resolve to `192.168.50.53:80`; all examples below use `http://`.
+
 ## How To Run
 
 ### Service status

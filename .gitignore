@@ -4,9 +4,19 @@
 !.env.example
 .gcal_token.json
 scripts/.gcal_client_secret.json
+scripts/.config/
 
-# Claude Code local settings
+# Personal / private data — never push
+decisions/
+memory/
+data/
+.claude/telegram-history/
+
+# Claude Code local settings & runtime state
 .claude/settings.local.json
+.claude/couchdb-sync-seq.txt
+.claude/scheduled_tasks.lock
+.claude/launch.json
 
 # Logs
 *.log
@@ -32,10 +42,15 @@ Notes/
 Daily/
 Templates/
 .obsidian/
+00 - Inbox/
 10 - Projects/
 20 - Areas/
 30 - Resources/
+40 - Archive/
+50 - Fleeting/
+Reference/
 *.canvas
+*.base
 
 # Loose personal files in repo root (Obsidian vault overlap)
 /*.pdf
@@ -44,14 +59,26 @@ Templates/
 /2026-*.md
 /Libbey*.md
 /The start*.md
+/Untitled*
+/command.md
+.trash/
+.tmp/
+_scratch/
+vault/
+OS/
+*.bak
 
 # Python
 scripts/__pycache__/
 __pycache__/
 *.pyc
+.venv/
 
 # Logs directory
 logs/
 
 # Obsidian junction (Windows only, auto-created)
 claude/
+
+# Claude Code worktrees (transient parallel branches)
+.claude/worktrees/

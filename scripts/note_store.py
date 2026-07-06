@@ -35,10 +35,23 @@ def daily_note_rel_path(target_date: date, daily_dir: str = DEFAULT_DAILY_DIR) -
 
 
 def upsert_section(note_text: str, header: str, new_body: str, anchor: str | None = None) -> str:
-    pattern = re.compile(rf"^{re.escape(header)}\n.*?(?=^## |\Z)", re.MULTILINE | re.DOTALL)
+    if header == "## Briefing":
+        # Briefing bodies intentionally contain their own `##` subheadings.  End
+        # only at the next daily-note shell section, not at the first nested
+        # heading inside the rendered command brief.
+        boundary = (
+            r"^## Today's Focus\b|^## Schedule\b|^## Tasks\b|"
+            r"^## Notes & Captures\b|^## Projects & Lab\b|^## Evening Review\b|\Z"
+        )
+        pattern = re.compile(rf"^{re.escape(header)}\n.*?(?={boundary})", re.MULTILINE | re.DOTALL)
+    else:
+        pattern = re.compile(rf"^{re.escape(header)}\n.*?(?=^## |\Z)", re.MULTILINE | re.DOTALL)
     replacement = f"{header}\n{new_body.rstrip()}\n"
     if pattern.search(note_text):
-        return pattern.sub(replacement, note_text)
+        # Use a callable replacement so backslashes in `replacement` are NOT
+        # interpreted as backreferences (e.g. `memory\infra\learnings.md`
+        # would otherwise blow up with "bad escape \i").
+        return pattern.sub(lambda _m: replacement, note_text)
     if anchor:
         idx = note_text.find(anchor)
         if idx >= 0:

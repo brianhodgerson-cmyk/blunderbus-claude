@@ -50,7 +50,7 @@ echo | openssl s_client -connect <DOMAIN>:443 -servername <DOMAIN> 2>/dev/null |
 
 ### Test external accessibility
 ```bash
-for domain in pfsense.hodgespot.com vaultwarden.hodgespot.com; do
+for domain in vaultwarden.hodgespot.com wg.hodgespot.com; do
   STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://$domain")
   echo "$domain: $STATUS"
 done

@@ -1,121 +1,130 @@
 ---
 name: morning-brief
-description: Generate a daily morning briefing aggregating infrastructure health, security events, camera detections, and system alerts from the past 24 hours.
-allowed-tools: Bash, mcp__obsidian__obsidian_read, mcp__obsidian__obsidian_append, mcp__obsidian__obsidian_search
+description: Generate a daily morning briefing aggregating infrastructure health, security events, camera detections, and system alerts from the past 24 hours. Optionally appends a personal workspace summary (email, calendar, tasks) via the workspace-brief skill.
+allowed-tools: Bash, mcp__blunderbus__blunderbus_proxmox, mcp__blunderbus__blunderbus_truenas, mcp__blunderbus__blunderbus_home_assistant, mcp__blunderbus__blunderbus_asus_router
 ---
 
-# Morning Brief — Daily Infrastructure Summary
-
-> SSH aliases are defined in ~/.ssh/config — always use aliases (e.g. `ssh cortex`), never `user@IP`.
+# Morning Brief - Daily Infrastructure Summary
 
 ## What This Does
-Compiles an executive summary of the last 24 hours across all HodgeSpot systems. Designed to be run as a scheduled task in Claude Code Desktop.
-
-## Obsidian Integration
-
-**Before collecting data**, read today's daily note to understand what's already populated:
-```
-obsidian_read("Daily/YYYY-MM-DD.md")   # use today's date
-```
-
-Check which sections already have content (Health, Infrastructure, Finance). Skip sections that are already populated unless the user explicitly asks to refresh.
-
-**After generating the report**, append the Infrastructure section to today's daily note:
-```
-obsidian_append(
-    path="Daily/YYYY-MM-DD.md",
-    content="<the formatted infrastructure block>",
-    heading="Infrastructure"
-)
-```
-
-If the daily note doesn't exist yet, create it first using the template format:
-```
-obsidian_write("Daily/YYYY-MM-DD.md", "<full daily note template with Infrastructure filled in>")
-```
-
-Always confirm to the user what was written and which sections were updated.
+Compiles an executive summary of the last 24 hours across all HodgeSpot systems. MCP tools handle the heavy infrastructure sections (fast, no credentials, low context cost). SSH/curl used only for Docker containers, security events, cameras, and Prometheus — which have no MCP equivalent.
 
 ## How To Schedule
-In Claude Code Desktop, set up as a scheduled task:
+In Claude Code Desktop scheduled tasks:
 ```
 Every day at 7:00 AM: Run /morning-brief
 ```
 
-## Data Collection Steps
+---
 
-### 1. Infrastructure health snapshot
-Run the `/infra-check` sweep:
+## Data Collection (run in this order)
+
+### 1. VM Health — Proxmox MCP
+```
+action: list_vms
+```
+Summarize: how many running, any unexpected stops, flag high CPU/RAM.
+
+### 2. NAS Health — TrueNAS MCP
+```
+action: get_pool_status
+```
+```
+action: list_datasets
+```
+Flag pool degraded or any dataset > 80% used. Also check undismissed alerts:
 ```bash
-for host in cortex stark banner truenas homeassistant loki; do
-  echo "=== $host ==="
-  ssh "$host" "uptime && free -h | grep Mem && df -h / | tail -1" 2>&1 || echo "❌ Unreachable"
-done
-# Thor (192.168.50.136) is the local workstation — run locally
-echo "=== thor (local) ==="
-uptime && free -h | grep Mem && df -h / | tail -1
+curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
+  "http://192.168.50.50/api/v2.0/alert/list" | \
+  jq '[.[] | select(.dismissed == false)] | length, .[].formatted'
 ```
 
-### 2. Docker container status
-```bash
-echo "=== Cortex ==="
-ssh cortex "docker ps --format '{{.Names}}: {{.Status}}'"
-echo "=== Stark ==="
-ssh stark "docker ps --format '{{.Names}}: {{.Status}}'"
+### 3. Router Status — Router MCP
+```
+action: get_system_status
+```
+```
+action: get_traffic_stats
+```
+Flag if CPU temp > 75°C or RAM > 80%.
+
+### 4. Home Status — HA MCP
+```
+action: get_state
+entity_id: person.brian_hodgerson
+```
+```
+action: get_state
+entity_id: weather.forecast_home
+```
+```
+action: get_state
+entity_id: climate.master_bedroom_thermostat
 ```
 
-### 3. Security events (24h)
+### 5. Container anomalies — SSH (anomaly-only filter)
 ```bash
-curl -sk -H "Authorization: Bearer $SECONION_API_KEY" \
-  "https://192.168.50.103/api/alerts?limit=50&range=24h&sort=severity:desc"
+ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new cortex \
+  "docker ps --format '{{.Names}}: {{.Status}}' | grep -v ': Up'"
+```
+```bash
+ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new stark \
+  "docker ps --format '{{.Names}}: {{.Status}}' | grep -v ': Up'"
+```
+If both return empty output → all containers healthy.
+
+### 6. Security events (24h) — SecOnion
+```bash
+bash ./scripts/seconion-query.sh 'event.module:suricata' 24 50 | jq '.'
 ```
 
-### 4. Firewall summary
-```bash
-curl -sk -u "$PFSENSE_USER:$PFSENSE_PASS" \
-  "https://pfsense.hodgespot.com/api/v2/status/gateways" | jq '.data[] | {name: .name, status: .status}'
-```
-
-### 5. Camera events (24h)
+### 7. Camera events (24h) — Frigate
 ```bash
 YESTERDAY=$(date -d '24 hours ago' +%s)
-curl -s "http://192.168.50.205:5000/api/events?after=$YESTERDAY&limit=100" | jq 'group_by(.camera) | .[] | {camera: .[0].camera, total_events: length, labels: [.[].label] | group_by(.) | map({label: .[0], count: length})}'
+curl -s "http://192.168.50.205:5000/api/events?after=$YESTERDAY&limit=100" | \
+  jq 'group_by(.camera) | .[] | {camera: .[0].camera, total: length, labels: [.[].label] | group_by(.) | map({label: .[0], count: length})}'
 ```
 
-### 6. NAS health
+### 8. Prometheus firing alerts
 ```bash
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/pool" | jq '.[] | {name: .name, status: .status, healthy: .healthy}'
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/alert/list" | jq '.[] | select(.dismissed == false)'
+curl -s "http://192.168.50.202:9090/api/v1/alerts" | \
+  jq '[.data.alerts[] | select(.state=="firing")] | length, .[].labels | {alert: .alertname, instance: .instance, severity: .severity}'
 ```
 
-### 7. Prometheus alerts (24h)
-```bash
-ssh banner 'curl -s "http://localhost:9090/api/v1/alerts"' | jq '.data.alerts[] | {alertname: .labels.alertname, state: .state, severity: .labels.severity}'
-```
+---
 
 ## Report Format
 
 ```
-# Morning Brief — <DATE>
+# Morning Brief — <DATE> <TIME>
 
-## 🏥 Infrastructure
-<table of host health>
+## Infrastructure  ✅/⚠️/❌
+| VM | Status | CPU% | RAM% | Uptime |
+<table from Proxmox MCP — flag anomalies only, summarize healthy count>
 
-## 🐳 Containers
-<Cortex: X running, Y unhealthy | Stark: X running, Y unhealthy>
+## Storage  ✅/⚠️/❌
+Pool: nas-pool — ONLINE, 8.1TB / 36.4TB used, scrub clean
+<Any undismissed alerts or datasets > 80%>
 
-## 🔒 Security
-<X alerts in 24h — breakdown by severity>
-<Notable findings>
+## Network  ✅/⚠️/❌
+Router: CPU XX%, RAM XX%, temps normal | Gateways: all online
 
-## 📷 Cameras
-<X total events — breakdown by camera and label>
+## Home
+Brian: home/away | Weather: <conditions, temp> | Thermostat: <temp>°F <mode>
 
-## 💾 Storage
-<Pool status, usage, any alerts>
+## Containers  ✅/⚠️/❌
+Cortex: X running, 0 unhealthy | Stark: X running, 0 unhealthy
+<List any non-Up containers>
 
-## ⚠️ Action Items
-<Anything requiring attention, ranked by priority>
+## Security  ✅/⚠️/❌
+<X IDS alerts in 24h — CRITICAL: X, HIGH: X, MEDIUM: X>
+<Notable findings if any>
+
+## Cameras
+<X total events — by camera and label>
+<Any notable detections>
+
+## Action Items
+<Ranked list of anything requiring operator attention>
+<"None" if everything is clean>
 ```

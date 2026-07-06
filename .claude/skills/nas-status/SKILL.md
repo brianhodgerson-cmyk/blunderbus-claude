@@ -1,56 +1,86 @@
 ---
 name: nas-status
-description: Check TrueNAS storage health — ZFS pool status, dataset usage, snapshots, disk health, and replication status.
-allowed-tools: Bash, mcp__obsidian__obsidian_append
+description: Check TrueNAS storage health — ZFS pool status, dataset usage, snapshots, disk health, and shares. Fully MCP-driven, no curl or SSH required.
+allowed-tools: mcp__blunderbus__blunderbus_truenas
 ---
 
-# NAS Status — TrueNAS
+# NAS Status — TrueNAS (Heimdall, 192.168.50.50)
 
 ## What This Does
-Queries TrueNAS at 192.168.50.50 for storage pool health, dataset usage, snapshot inventory, and disk SMART status.
+Queries TrueNAS via MCP for all storage health signals. No credentials or SSH needed — the MCP server handles auth.
 
-## Obsidian Integration
-After formatting results, offer to append to today's daily note under the Infrastructure heading. If `--save` is passed, append automatically.
+## MCP Actions
 
-## How To Run
-
-### Pool status
-```bash
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/pool" | jq '.[] | {name: .name, status: .status, healthy: .healthy, size: .topology}'
+### Pool status (run first)
 ```
+action: get_pool_status
+```
+Returns: name, status, healthy, scan state, scan errors, size, allocated, free.
+Flag ❌ if status != "ONLINE", healthy != true, or scan errors > 0.
 
 ### Dataset usage
-```bash
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/pool/dataset" | jq '.[] | {name: .name, used: .used.parsed, available: .available.parsed, compression: .compression.value}'
+```
+action: list_datasets
+```
+Returns: dataset name, used bytes, available bytes, compression.
+Flag ⚠️ if any dataset used > 80% of (used + available).
+
+### Optional: filter by pool
+```
+action: list_datasets
+pool_name: nas-pool
 ```
 
-### List snapshots
-```bash
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/zfs/snapshot?limit=20&order_by=-name" | jq '.[] | {name: .name, created: .properties.creation.parsed}'
+### Snapshot inventory
+```
+action: list_snapshots
+limit: 20
+```
+Returns: snapshot names and creation times.
+
+### Snapshot on specific dataset
+```
+action: list_snapshots
+dataset: nas-pool/<DATASET>
+limit: 10
 ```
 
 ### Disk health (SMART)
-```bash
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/disk" | jq '.[] | {name: .name, model: .model, serial: .serial, size: .size, temp: .temperature}'
+```
+action: get_disk_health
+```
+Returns: disk name, model, serial, size, temperature, health status.
+Flag ⚠️ if any disk temp > 45°C. Flag ❌ if SMART errors present.
+
+### Shares
+```
+action: list_shares
+```
+Returns: NFS and SMB shares, paths, enabled state.
+
+### Create snapshot (confirm with operator first)
+```
+action: create_snapshot
+dataset: nas-pool/<DATASET>
+snapshot_name: manual-<DATE>
+confirm: true
 ```
 
-### Alerts
-```bash
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/alert/list" | jq '.[] | {level: .level, formatted: .formatted, datetime: .datetime}'
-```
+## Thresholds
 
-### Replication tasks
-```bash
-curl -s -H "Authorization: Bearer $TRUENAS_API_KEY" \
-  "http://192.168.50.50/api/v2.0/replication" | jq '.[] | {name: .name, state: .state, last_snapshot: .state.last_snapshot}'
-```
+| Metric | ⚠️ Warn | ❌ Critical |
+|--------|---------|------------|
+| Pool status | — | != ONLINE |
+| Pool healthy | — | false |
+| Scrub errors | — | > 0 |
+| Pool used | > 75% | > 90% |
+| Disk temp | > 45°C | > 55°C |
+| SMART status | — | any errors |
 
 ## Report Format
-| Pool | Status | Used | Available | Health |
-|------|--------|------|-----------|--------|
-Flag ⚠️ if pool degraded or > 80% used. Flag ❌ if pool faulted or disk SMART errors.
+
+| Pool | Status | Used | Free | Scrub | Health |
+|------|--------|------|------|-------|--------|
+| nas-pool | ONLINE | 8.1TB | 31.8TB | Clean (0 errors) | ✅ |
+
+List any active alerts or datasets approaching capacity below the table.
