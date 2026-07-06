@@ -14,16 +14,18 @@
 #   timeout           handler timeout seconds (claude/script)
 
 rules:
-  # Person detected by Frigate → immediate Discord ping, 5 min per camera
-  - name: frigate-person
-    mqtt_topic: "frigate/events"
-    conditions:
-      - "type=new"
-      - "after.label=person"
-    handler: discord
-    debounce_seconds: 300
-    debounce_key: "{after.camera}"
-    message: "🚶 **Person detected** on `{after.camera}` (score {after.top_score}). Frigate: http://192.168.50.205:5000"
+  # Person detected by Frigate → Discord ping.
+  # DISABLED 2026-07-06 per Brian — too noisy as-is; re-enable after tuning
+  # (candidates: quiet hours, zone filter, armed-only gate via HA state).
+  # - name: frigate-person
+  #   mqtt_topic: "frigate/events"
+  #   conditions:
+  #     - "type=new"
+  #     - "after.label=person"
+  #   handler: discord
+  #   debounce_seconds: 300
+  #   debounce_key: "{after.camera}"
+  #   message: "🚶 **Person detected** on `{after.camera}` (score {after.top_score}). Frigate: http://192.168.50.205:5000"
 
   # Alertmanager (Banner) webhook → infra triage via claude, 10 min per alert
   - name: alertmanager

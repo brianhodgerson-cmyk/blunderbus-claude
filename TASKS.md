@@ -11,6 +11,8 @@
 
 ## Backlog
 
+- [ ] Fine-tune camera alert rules in dispatcher (frigate-person disabled 2026-07-06 — options: quiet hours, zone filter, armed-only gate via HA)
+
 ## Completed
 - [x] Set up IPVanish/OpenVPN on Ubuntu after finding IPVanish credentials; import `.ovpn` profiles via NetworkManager and save creds. *(resolved 2026-06-10 — old migrated-project backlog)*
 - [x] Phase 2: Connectivity (NPM proxy for ProfX services, MinIO external access) *(resolved 2026-06-10 — old migrated-project backlog)*
