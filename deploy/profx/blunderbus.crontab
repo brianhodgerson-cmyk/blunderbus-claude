@@ -1,7 +1,0 @@
-# BlunderBus ProfX cron schedule
-
-0 6 * * * /opt/blunderbus/venv/bin/python /opt/blunderbus/repo/scripts/morning_prep.py >> /opt/blunderbus/logs/morning-prep.log 2>&1
-30 6 * * * /opt/blunderbus/venv/bin/python /opt/blunderbus/repo/scripts/morning_brief_push.py >> /opt/blunderbus/logs/morning-brief.log 2>&1
-30 7 * * * /opt/blunderbus/venv/bin/python /opt/blunderbus/repo/scripts/finance_intel.py >> /opt/blunderbus/logs/finance-intel.log 2>&1
-0 8 * * * /opt/blunderbus/venv/bin/python /opt/blunderbus/repo/scripts/google-fit-ingest.py >> /opt/blunderbus/logs/health-ingest.log 2>&1
-0 21 * * * /opt/blunderbus/venv/bin/python /opt/blunderbus/repo/scripts/daily_note_review.py >> /opt/blunderbus/logs/daily-review.log 2>&1
