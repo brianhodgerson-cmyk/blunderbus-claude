@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly BlunderBus memory hygiene (Sunday 03:30 America/Chicago)
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00 America/Chicago
+Persistent=true
+RandomizedDelaySec=10m
+Unit=blunderbus-memory-hygiene.service
+
+[Install]
+WantedBy=timers.target

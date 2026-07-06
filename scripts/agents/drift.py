@@ -56,6 +56,7 @@ EXPECTED_TIMERS = [
     "blunderbus-monarch-ingest.timer",
     "blunderbus-drift-sentinel.timer",
     "blunderbus-ssh-cert-renew.timer",
+    "blunderbus-memory-hygiene.timer",
 ]
 EXPECTED_SERVICES_ACTIVE = [
     "bb-mcp.service",

@@ -1,0 +1,15 @@
+[Unit]
+Description=BlunderBus memory hygiene — weekly registry dedupe + concern lifecycle sweep
+OnFailure=blunderbus-failure-agent@%n.service
+Documentation=file:/home/brian/blunderbus-claude/scripts/agents/memory_hygiene.py
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=PATH=/home/brian/blunderbus-claude/.venv/bin:/home/brian/.local/bin:/home/brian/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+ExecStart=/home/brian/blunderbus-claude/scripts/run_pipeline.sh agents/memory_hygiene.py
+Nice=10
+StandardOutput=append:/home/brian/blunderbus-claude/logs/systemd-memory-hygiene.log
+StandardError=append:/home/brian/blunderbus-claude/logs/systemd-memory-hygiene.log

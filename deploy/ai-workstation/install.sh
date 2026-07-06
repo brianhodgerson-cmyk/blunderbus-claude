@@ -31,11 +31,13 @@ if ! cmp -s "${SRC_DIR}/70-streamdeck.rules" /etc/udev/rules.d/70-streamdeck.rul
   sudo udevadm control --reload
 fi
 
-# Timers (06:00 CT brief; 05:15 CT Monarch ingest; 02:30 CT drift sentinel)
+# Timers (06:00 CT brief; 05:15 CT Monarch ingest; 02:30 CT drift sentinel;
+#         Sun 03:30 CT memory hygiene)
 systemctl --user enable --now blunderbus-daily-brief.timer
 systemctl --user enable --now blunderbus-monarch-ingest.timer
 systemctl --user enable --now blunderbus-drift-sentinel.timer
 systemctl --user enable --now blunderbus-ssh-cert-renew.timer
+systemctl --user enable --now blunderbus-memory-hygiene.timer
 
 # Shadow dry-run timer is optional; enable for pipeline-change validation:
 # systemctl --user enable --now blunderbus-daily-brief-shadow.timer
