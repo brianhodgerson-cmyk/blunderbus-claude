@@ -142,6 +142,7 @@ Runs on AI-Workstation via **systemd user units** in `~/.config/systemd/user/`. 
 
 Timers (all America/Chicago):
 
+- **02:30** — `blunderbus-drift-sentinel.timer` → `agents/drift.py` — compares registry/inventory + `.ssh-config.example` + `deploy/` unit expectations against reality (qm/pct list, ssh probes, systemd states, docker ps baseline) and files `agent_concerns` (agent=`drift`) for every diff; auto-resolves cleared drift. Registry entries opt out per-check via `attributes.drift_ignore: [ssh|docker|proxmox]` (jarvis ignores `ssh` until the workstation key is in the HA addon). **Enabled.**
 - **05:15** — `blunderbus-monarch-ingest.timer` → `monarch_ingest.py` — pulls overnight finance data from Monarch into ClickHouse (cookie-auth via `MONARCH_SESSION_ID` from vault). **Currently disabled** pending a Monarch cookie refresh in Vaultwarden; re-enable with `systemctl --user enable --now blunderbus-monarch-ingest.timer` once cookies are fresh.
 - **06:00** — `blunderbus-daily-brief.timer` → `daily_brief.py` — fans out to agents (finance/infra/workspace), creates today's note from `note_template.build_note_shell()` if missing, runs AI synthesis, writes `## Briefing` section, pushes to Discord (`send_discord`) + `ops.hodgespot.com`. **Enabled.**
 - Optional — `blunderbus-daily-brief-shadow.timer` — dry-run validation of pipeline changes (disabled by default).

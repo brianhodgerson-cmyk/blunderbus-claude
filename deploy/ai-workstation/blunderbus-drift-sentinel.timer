@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly BlunderBus drift sentinel (02:30 America/Chicago)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 America/Chicago
+Persistent=true
+RandomizedDelaySec=10m
+Unit=blunderbus-drift-sentinel.service
+
+[Install]
+WantedBy=timers.target
