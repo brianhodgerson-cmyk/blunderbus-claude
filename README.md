@@ -28,7 +28,7 @@ Long-running services: `bb-mcp.service` (MCP server), `bbm-api.service` (Memory 
 
 1. Clone the repo.
    ```bash
-   git clone https://github.com/brian-hodgespot/blunderbus-claude.git
+   git clone git@github.com:brianhodgerson-cmyk/blunderbus-claude.git
    cd blunderbus-claude
    ```
 
