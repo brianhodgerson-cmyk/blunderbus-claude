@@ -25,10 +25,12 @@ Vault item → env var mapping:
   monarch              / username   → MONARCH_USER
   monarch              / password   → MONARCH_PASS
   jarvis-postgres      / password   → BLUNDERBUS_DB_PASSWORD
+  clickhouse           / username   → CLICKHOUSE_USER
+  clickhouse           / password   → CLICKHOUSE_PASS (+ CLICKHOUSE_PASSWORD alias)
 
 Non-vault (stays in .env):
   BW_MASTER_PASS, MQTT_*, PORTAINER_*, NPM_*,
-  CLICKHOUSE_*, LITELLM_*, GITHUB_TOKEN, OBSIDIAN_URL
+  LITELLM_*, GITHUB_TOKEN, OBSIDIAN_URL
 
 Usage:
     from vault import load_secrets
@@ -75,6 +77,10 @@ VAULT_MAP = [
     # Login-type item — vault.py reads `login.password` when field_name is "password"
     # and the item has no custom field of that name.
     ("jarvis-postgres",       "password", "BLUNDERBUS_DB_PASSWORD"),
+    # ClickHouse on Cortex (jarvis-clickhouse) — rotated 2026-07-06, vault-managed since.
+    ("clickhouse",            "username", "CLICKHOUSE_USER"),
+    ("clickhouse",            "password", "CLICKHOUSE_PASS"),
+    ("clickhouse",            "password", "CLICKHOUSE_PASSWORD"),
 ]
 
 

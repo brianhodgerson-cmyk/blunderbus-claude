@@ -58,10 +58,13 @@ def ch_query(sql: str) -> list[list[str]]:
     """Run a ClickHouse query via ssh→docker and return tab-separated rows.
     Returns [] on any failure (including unreachable ClickHouse) — caller should
     treat empty result as 'unable to refresh' rather than 'no data'."""
+    import shlex
+    ch_user = os.environ.get("CLICKHOUSE_USER", "clickhouse")
+    ch_pass = os.environ.get("CLICKHOUSE_PASS") or os.environ.get("CLICKHOUSE_PASSWORD", "")
     cmd = [
         "ssh", "-o", "ConnectTimeout=10", "cortex",
         "docker exec jarvis-clickhouse clickhouse-client "
-        "--user clickhouse --password clickhouse "
+        f"--user {shlex.quote(ch_user)} --password {shlex.quote(ch_pass)} "
         f"--query \"{sql}\""
     ]
     try:
