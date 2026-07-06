@@ -1,0 +1,20 @@
+[Unit]
+Description=BlunderBus event dispatcher — MQTT + webhook → agent invocations
+OnFailure=blunderbus-failure-agent@%n.service
+Documentation=file:/home/brian/blunderbus-claude/scripts/dispatcher.py
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=PATH=/home/brian/blunderbus-claude/.venv/bin:/home/brian/.local/bin:/home/brian/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+ExecStart=/home/brian/blunderbus-claude/scripts/run_pipeline.sh dispatcher.py
+Restart=on-failure
+RestartSec=15
+Nice=10
+StandardOutput=append:/home/brian/blunderbus-claude/logs/systemd-dispatcher.log
+StandardError=append:/home/brian/blunderbus-claude/logs/systemd-dispatcher.log
+
+[Install]
+WantedBy=default.target

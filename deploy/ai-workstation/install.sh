@@ -13,6 +13,7 @@ systemctl --user daemon-reload
 
 # Long-running services
 systemctl --user enable --now bb-mcp.service bbm-api.service blunderbus-couchdb-sync.service
+systemctl --user enable --now blunderbus-dispatcher.service
 
 # Desktop voice stack: Hermes gateway (Discord), warm Canary STT, Stream Deck PTT
 systemctl --user enable --now hermes-gateway.service canary-stt.service

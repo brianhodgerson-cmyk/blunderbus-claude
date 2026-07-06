@@ -1,0 +1,76 @@
+# BlunderBus dispatcher rules (scripts/dispatcher.py)
+#
+# Rule fields:
+#   name              unique id (used in debounce state + concerns)
+#   mqtt_topic        fnmatch glob against MQTT topic   (mqtt rules)
+#   webhook_path      fnmatch glob against POST path    (webhook rules)
+#   conditions        list of "dotted.json.path=value" filters on the event body
+#   handler           discord | claude | script
+#   debounce_seconds  suppress repeat fires per debounce_key within window
+#   debounce_key      template; {dotted.path} placeholders resolve into the event
+#   message           (discord) template
+#   prompt            (claude) template; result is posted to Discord
+#   channel           optional Discord channel override
+#   timeout           handler timeout seconds (claude/script)
+
+rules:
+  # Person detected by Frigate → immediate Discord ping, 5 min per camera
+  - name: frigate-person
+    mqtt_topic: "frigate/events"
+    conditions:
+      - "type=new"
+      - "after.label=person"
+    handler: discord
+    debounce_seconds: 300
+    debounce_key: "{after.camera}"
+    message: "🚶 **Person detected** on `{after.camera}` (score {after.top_score}). Frigate: http://192.168.50.205:5000"
+
+  # Alertmanager (Banner) webhook → infra triage via claude, 10 min per alert
+  - name: alertmanager
+    webhook_path: "/webhook/alertmanager"
+    handler: claude
+    debounce_seconds: 600
+    debounce_key: "{groupLabels.alertname}"
+    timeout: 180
+    discord_prefix: "🚨 **Alert triage**"
+    prompt: |
+      You are BlunderBus infra triage. An Alertmanager webhook fired on the
+      HodgeSpot homelab (Proxmox cluster, hosts per your knowledge). Alert JSON:
+
+      {payload}
+
+      In <=6 lines: what is alerting, most likely cause, and the single next
+      diagnostic command the operator should run. No preamble.
+
+  # Generic HA automation webhook → claude reasoning lane
+  - name: ha-event
+    webhook_path: "/webhook/ha/*"
+    handler: claude
+    debounce_seconds: 60
+    debounce_key: "{path}"
+    timeout: 120
+    discord_prefix: "🏠 **HA event**"
+    prompt: |
+      You are BlunderBus. A Home Assistant automation posted this event to your
+      webhook ({path}):
+
+      {payload}
+
+      Reply in <=4 lines with what happened and any recommended action. If the
+      payload includes a question, answer it directly. No preamble.
+
+  # Anything on the LAN can trigger an agent by publishing to blunderbus/dispatch
+  - name: bb-dispatch
+    mqtt_topic: "blunderbus/dispatch"
+    handler: claude
+    debounce_seconds: 30
+    debounce_key: "all"
+    timeout: 120
+    discord_prefix: "📨 **Dispatch**"
+    prompt: |
+      You are BlunderBus. An event was published to blunderbus/dispatch:
+
+      {payload}
+
+      Handle it in <=6 lines. If it is a request, answer it; if it is telemetry,
+      summarize and flag anything actionable. No preamble.
