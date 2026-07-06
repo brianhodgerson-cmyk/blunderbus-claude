@@ -1,0 +1,22 @@
+# Ollama on AI-Workstation (RTX 4080) — local tool-calling model for voice/agents.
+# Registered in litellm (Cortex) as the "gpt-4o-mini" model group (name is what
+# HA's extended_openai_conversation requests by default; backend is qwen3:4b).
+# Start: docker compose up -d && docker exec ollama ollama pull qwen3:4b
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./data:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

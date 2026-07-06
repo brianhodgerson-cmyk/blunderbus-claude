@@ -148,6 +148,8 @@ Timers (all America/Chicago):
 
 Long-running services (also installed by `install.sh`): `bb-mcp.service` (BlunderBus MCP server — `mcp-servers/anthropic-bridge/server.py --http`), `bbm-api.service` (Memory FastAPI), `blunderbus-couchdb-sync.service`. Interactive chat runs through the Hermes gateway (`hermes-gateway.service`) → Discord `#general` (JARVIS category); Hermes operational memory is `~/.hermes/memories/MEMORY.md`. Telegram is fully retired (bot and services deleted 2026-07-06).
 
+**Voice bridge (2026-07-06):** HA Assist and the desk PTT share one warm GPU STT. `wyoming-canary.service` (repo `voice/wyoming_canary.py`) exposes Canary on Wyoming `:10300`; Piper TTS runs in docker on `:10200` (voice `en_US-ryan-high`, `deploy/ai-workstation/piper/`); local brain is Ollama `qwen3:4b-instruct` on `:11434` (`deploy/ai-workstation/ollama/`), registered in litellm (Cortex) as model group `gpt-4o-mini` — that name is what HA's `extended_openai_conversation` requests by default (its options flow is broken, so the model is fixed litellm-side). HA "BlunderBus" Assist pipeline = `stt.canary_qwen` + `conversation.extended_openai_conversation_3` ("BlunderBus LiteLLM" entry, scoped litellm key `ha-assist-voice`) + `tts.piper_2`. ⚠️ Known issue: litellm's `ANTHROPIC_API_KEY` on Cortex is invalid — `tool-agent` silently falls back to `perplexity/sonar`.
+
 The note's `## Tasks` section is rendered from `TASKS.md` (`## Active` + `## Ops — Needs Attention` sections) — single source of truth. The legacy `morning_prep.py` and its daily-note carry-forward scanner were retired 2026-05-12, along with the old Windows Task Scheduler jobs.
 
 ## AI / Claude CLI

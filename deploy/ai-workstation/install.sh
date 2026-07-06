@@ -18,6 +18,12 @@ systemctl --user enable --now bb-mcp.service bbm-api.service blunderbus-couchdb-
 systemctl --user enable --now hermes-gateway.service canary-stt.service
 systemctl --user enable jarvis-streamdeck.service   # udev starts it when the deck is plugged in
 
+# HA Assist voice bridge: Wyoming shim (:10300 -> Canary), Piper TTS (:10200), local LLM (:11434)
+systemctl --user enable --now wyoming-canary.service
+docker compose -f "${SRC_DIR}/piper/docker-compose.yml" up -d
+docker compose -f "${SRC_DIR}/ollama/docker-compose.yml" up -d
+docker exec ollama ollama pull qwen3:4b-instruct || echo "pull qwen3:4b-instruct manually once ollama is up"
+
 # udev: deck access + auto-start jarvis-streamdeck on plug (needs sudo)
 if ! cmp -s "${SRC_DIR}/70-streamdeck.rules" /etc/udev/rules.d/70-streamdeck.rules 2>/dev/null; then
   sudo cp "${SRC_DIR}/70-streamdeck.rules" /etc/udev/rules.d/70-streamdeck.rules

@@ -1,0 +1,12 @@
+# Piper TTS (Wyoming protocol :10200) — serves HA Assist + desk voice replies.
+# CPU-only; voices cached in ./data. Start: docker compose up -d
+services:
+  wyoming-piper:
+    image: rhasspy/wyoming-piper
+    container_name: wyoming-piper
+    restart: unless-stopped
+    ports:
+      - "10200:10200"
+    volumes:
+      - ./data:/data
+    command: --voice en_US-ryan-high

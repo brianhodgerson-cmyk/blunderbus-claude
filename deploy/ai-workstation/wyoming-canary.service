@@ -1,0 +1,13 @@
+[Unit]
+Description=Wyoming ASR shim for warm Canary STT (serves HA Assist on :10300)
+After=network-online.target canary-stt.service
+Wants=canary-stt.service
+
+[Service]
+Type=simple
+ExecStart=/home/brian/blunderbus-claude/.venv/bin/python /home/brian/blunderbus-claude/voice/wyoming_canary.py --uri tcp://0.0.0.0:10300 --canary-url http://127.0.0.1:8765
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
