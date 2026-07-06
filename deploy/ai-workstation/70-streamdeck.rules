@@ -1,0 +1,3 @@
+# Elgato Stream Deck access for local desktop user
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", TAG+="uaccess", MODE="0660"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0fd9", TAG+="uaccess", MODE="0660", TAG+="systemd", ENV{SYSTEMD_USER_WANTS}="jarvis-streamdeck.service"

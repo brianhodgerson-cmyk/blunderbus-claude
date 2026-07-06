@@ -1,0 +1,15 @@
+[Unit]
+Description=Warm Canary-Qwen STT server
+After=graphical-session.target network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/brian/ai-tools/stt-canary/.venv/bin/python /home/brian/ai-tools/stt-canary/canary_server.py --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=CANARY_MODEL=nvidia/canary-qwen-2.5b
+Environment=CANARY_MAX_NEW_TOKENS=256
+
+[Install]
+WantedBy=default.target

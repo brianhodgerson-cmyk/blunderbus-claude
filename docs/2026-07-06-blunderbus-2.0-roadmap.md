@@ -28,9 +28,18 @@ Build one small dispatcher on AI-Workstation: subscribe to MQTT topics + an HTTP
 
 This converts the fleet's existing telemetry into agent triggers with ~one new component.
 
-### 2. Voice via HA Assist pipeline
+### 2. Voice: bridge the two existing stacks (desk + house)
 
-The 2026 local stack is faster-whisper + Piper + a tool-calling LLM behind HA's Assist pipeline. You already have: local STT on AI-Workstation, a 4080, Ollama (though Thor is stopped — Ollama can move to AI-Workstation), litellm to route. Missing: wiring Assist → an OpenAI-compatible endpoint (litellm) with a tool-calling model (Qwen3 8B is the community pick; skip reasoning models for voice). HA's $59 Voice PE puck or ESP32 satellites give you room coverage. This turns "Jarvis" from a Discord persona into an actual house voice, fully local.
+*(Revised 2026-07-06 after auditing the live desk setup.)* There are already two voice systems, and they serve different rooms:
+
+- **Desk (AI-Workstation)**: `canary-stt.service` — warm NVIDIA Canary-Qwen STT on `:8765` (GPU, better than faster-whisper) — plus `jarvis-streamdeck` push-to-talk: DICT (type into focused app), ASK DISCORD (voice → Hermes → #general shared session), ASK VOICE (spoken reply via edge-tts). udev-managed since 2026-07-06: the service starts on deck plug, retries every 30 s instead of crash-looping. Units + udev rule are canonical in `deploy/ai-workstation/`.
+- **House (HA Assist)**: wake-word, room satellites, device control — not yet LLM-wired.
+
+Don't pick one; converge the plumbing:
+
+1. **Share the STT** — wrap the warm Canary server in a Wyoming-protocol shim so HA's pipeline uses it instead of running its own whisper. One GPU model serves desk + house.
+2. **Share the brain** — point HA Assist's conversation agent at litellm (tool-calling model; Qwen3 8B is the 2026 community pick, skip reasoning models for voice) and converge on the same Hermes/BlunderBus context so desk and house are one JARVIS.
+3. **Swap edge-tts → Piper** on the desk lane — the only remaining cloud dependency; HA needs Piper anyway, share one instance. (Trade-off: edge-tts voices sound better; test Piper's `en_US-*-high` voices before committing.)
 
 ### 3. Drift sentinel (proved necessary *today*)
 
