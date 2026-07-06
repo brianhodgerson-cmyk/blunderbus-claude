@@ -16,65 +16,13 @@ BlunderBus covers three domains:
 2. **Daily note automation** — Obsidian morning prep, infra brief, health push (6–8 AM pipeline)
 3. **Finance intelligence** — Monarch Money → ClickHouse → Obsidian/Discord (05:15 ingest / 06:00 brief, America/Chicago)
 
-## Network Topology
+## Fleet quick reference
 
-All VMs run on Proxmox node `Multiverse`.
+Proxmox node `Multiverse` (alias `proxmox`, `root`). **Full topology tables — IPs, VMIDs, SSH users, per-host gotchas, Grafana/Prometheus API patterns, service URLs — live in the `infra-topology` skill. Load it whenever you need a host's IP, port, or SSH user.**
 
-### Virtual Machines (QEMU)
-
-| VM | Host | IP | SSH Alias | SSH User | Status | Role |
-|----|------|----|-----------|----------|--------|------|
-| 101 | Thor | 192.168.50.136 | `thor` | `brian` | stopped (verified 2026-07-06) | Workstation / Ollama (`qwen3:14b`), RTX 4080 GPU |
-| 100 | Heimdall | 192.168.50.50 | `heimdall` (`truenas` legacy) | `truenas_admin` | running | TrueNAS SCALE — NAS storage, ZFS pools, PCIe passthrough |
-| 102 | Jarvis | 192.168.50.206 | `homeassistant` | `root` | running | Home Assistant (SSH via Terminal & SSH add-on; AI-Workstation key NOT yet in addon config — add via UI) |
-| 103 | Fury | 192.168.50.103 | `fury` | `brian` | stopped (verified 2026-07-06) | IDS/IPS (SecOnion) |
-| 104 | Stark | 192.168.50.204 | `stark` | `blunderbus` | running | NPM, Open WebUI, Mosquitto MQTT, Portainer. QEMU guest agent available (`qm guest exec 104`) |
-| 105 | hawkeye | unknown | — | — | stopped | — |
-| 106 | Cortex | 192.168.50.106 | `cortex` | `root` | running | Docker stack: postgres, redis, litellm, langfuse, minio, clickhouse, mcp-gateway, pixel-dashboard. **ProxyJump through Stark** |
-| 109 | AI-Workstation | 192.168.50.208 | local / `ai-workstation` | `brian` | running | Current BlunderBus/Hermes runner, RTX 4080 passthrough, Stream Deck, local STT, desktop Hermes |
-
-### Containers (LXC)
-
-LXC containers are minimal Debian — **SSH user is always `root`**. No non-root users exist unless explicitly created.
-
-| VM | Host | IP | SSH Alias | Status | Role |
-|----|------|----|-----------|--------|------|
-| 200 | Groot | 192.168.50.53 | `groot` | running | AdGuard Home DNS (`:80` web, `:53` DNS) |
-| 202 | Banner | 192.168.50.202 | `banner` | running | Grafana (`:3000`), Prometheus, Alertmanager (`:9093` → dispatcher webhook, wired 2026-07-06), InfluxDB |
-| 205 | Hawkeye | 192.168.50.205 | `hawkeye-nvr` | running | Frigate NVR (`:5000`) |
-| 207 | Loki | 192.168.50.207 | `loki` | running | Loki log aggregation (`:3100`) |
-| 108 | Mercury | 192.168.50.109 | `mercury` | running | Russ's TLS workspace (memory-architecture tenant); user `russ` exists |
-| 210 | Vision | 192.168.50.210 | `vision` | running | BlunderBus Ops UI (Next.js `:3030`), MCP server (`:8788`), vision_server (`:8787`), Frigate MQTT bridge |
-| 107 | ProfX | 192.168.50.57 | `profx` | intentionally stopped/decommissioned | Former BlunderBus brain/job runner. Runtime/scheduling migrated to AI-Workstation; do not treat ProfX down as an incident. Keep as cold archive/reference only. |
-
-### Proxmox Host
-
-| Host | IP | SSH Alias | SSH User | Role |
-|------|----|-----------|----------|------|
-| Multiverse | 192.168.50.100 | `proxmox` | `root` | Proxmox VE hypervisor — manages all VMs and LXC containers |
-
-Proxmox also provides fallback access via `pct exec <VMID>` (LXC) and `qm guest exec <VMID>` (QEMU with guest agent — currently only Cortex/106).
-
-#### Grafana API (Banner)
-
-Prefer SSH over browser for data retrieval — direct JSON, no auth token needed from localhost:
-
-```bash
-ssh banner 'curl -s http://localhost:3000/api/health'
-ssh banner 'curl -s http://localhost:3000/api/datasources'
-ssh banner 'curl -s "http://localhost:3000/api/dashboards/home"'
-```
-
-For authenticated endpoints (user/org management), add `-u admin:$GRAFANA_PASS`.
-
-Other services:
-- pfSense: NOT installed — ignore all pfSense references
-- Vaultwarden: `vaultwarden.hodgespot.com`
-- AdGuard Home: `http://192.168.50.53:80` (Groot, VM 200) — web UI and API both on HTTP :80
-- WireGuard VPN: wg-easy on Stark, web UI at `http://wg.hodgespot.com` (:51821), UDP 51820 port-forwarded from router WAN
-- Obsidian / daily notes: active local pipeline repo is `/home/brian/blunderbus-claude` on AI-Workstation; NAS/Obsidian vault may be mounted separately. Local REST API, when available, is at `https://127.0.0.1:27124`, token in Vaultwarden as "Obsidian API" (field: `token`). ProfX is no longer the master runtime.
-- Google Workspace: `gws` CLI installed, authenticated as `bh@hodgespot.com`, skills: `gws-mail`, `gws-tasks`, `workspace-brief`
-- Homepage dashboard: `http://192.168.50.204:3000`
+- Running: `heimdall` (TrueNAS, `truenas_admin`), `homeassistant` (Jarvis, `root`), `stark` (`blunderbus`), `cortex` (`root`, ProxyJump via Stark), `groot`, `banner`, `hawkeye-nvr`, `loki`, `mercury`, `vision` (LXCs — SSH user always `root`), plus this host (AI-Workstation, VM 109)
+- Intentionally stopped: `thor`, `fury`, hawkeye (105). `profx` is decommissioned — never an incident.
+- pfSense: NOT installed — ignore all references.
 
 ## Environment Notes (AI-Workstation — Ubuntu desktop)
 
@@ -190,34 +138,11 @@ systemd user units have no ambient environment. All runner scripts must load sec
 
 ## ClickHouse Access
 
-ClickHouse on Cortex (`jarvis-clickhouse`) publishes both ports on the host — no SSH tunnel needed (verified 2026-07-06):
+Native `192.168.50.106:9000` / HTTP `:8123`; credentials from Vaultwarden item `clickhouse` via `scripts/vault.py`. **Query patterns, credential-rotation runbook, and the `snapshot_date = today()` anti-pattern are in the `data-query` skill — load it before writing ClickHouse queries.**
 
-- Native: `192.168.50.106:9000` (`clickhouse-driver` — preferred for scripts)
-- HTTP: `http://192.168.50.106:8123` (curl with Basic auth)
+## Monarch ingest authentication
 
-Credentials are vault-managed since 2026-07-06: Vaultwarden item `clickhouse` → `CLICKHOUSE_USER` / `CLICKHOUSE_PASS` / `CLICKHOUSE_PASSWORD` via `scripts/vault.py` (rotated same day; no longer in `.env`). Server-side source of truth is `/opt/blunderbus-v3/docker/.env` on Cortex — if rotating again, update there, `docker compose up -d --force-recreate clickhouse langfuse` (langfuse shares the credential), then update the Vaultwarden item.
-- **Anti-pattern:** `WHERE snapshot_date = today()` — Monarch ingest runs overnight, so today's date returns no rows. Always use `WHERE snapshot_date = (SELECT max(snapshot_date) FROM table)` to get the freshest data.
-
-## Monarch ingest authentication (post-2026-05-12)
-
-The Monarch web app rebranded to `api.monarch.com` and switched from Token-auth to **session-cookie auth**. The legacy `monarch_login.py` flow (POST `/auth/login/` → JWT Token) is rate-limited hard once you trip 429 once; recovery is unreliable.
-
-Production path:
-
-1. **Bootstrap cookies** (manual, takes ~30 seconds):
-   - Log into [app.monarch.com](https://app.monarch.com) in any browser
-   - DevTools → Network → click any request to `api.monarch.com/graphql` → Headers → copy `Cookie: session_id=…; csrftoken=…` and the `device-uuid` request header
-   - Push to Bitwarden `monarch` item custom fields: `session_id`, `csrftoken`, `device_uuid`, `session_refreshed_at`
-
-2. **Daily ingest** (`blunderbus-monarch-ingest.timer`, 05:15 America/Chicago — currently disabled pending cookie refresh):
-   - `scripts/monarch_ingest.py` reads cookies via `_mm_from_cookies()`, patches `MonarchMoneyEndpoints.BASE_URL` to `https://api.monarch.com`, calls `get_accounts()` / `get_transactions()` directly — no /login hit
-   - Writes to ClickHouse `finance.accounts` and `finance.transactions`
-
-3. **Cookie refresh** (manual when ingest 401s; expected cadence weeks):
-   - Re-run step 1 with a fresh browser session
-   - Future: `scripts/monarch_refresh.py` with Playwright will automate this
-
-Legacy fallbacks (`.monarch_session` file, `MONARCH_TOKEN`) remain in `monarch_ingest.py` for backward compatibility but should not be relied on.
+Session-cookie auth against `api.monarch.com` (Token flow is dead; 429s are punitive). **The bootstrap/refresh runbook is in the `monarch-auth` skill — load it before touching `monarch_ingest.py` auth or `MONARCH_*` vault fields.** Ingest timer currently disabled pending a cookie refresh.
 
 ## Obsidian REST API
 

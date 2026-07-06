@@ -19,9 +19,7 @@ fi
 
 # ── Hard blocks: never allowed, local or remote ───────────────────────────────
 BLOCKED_PATTERNS=(
-  "rm -rf /"
   "mkfs"
-  "dd if="
   "> /dev/sd"
   "chmod -R 777 /"
   ":(){ :|:& };:"
@@ -34,8 +32,23 @@ for pattern in "${BLOCKED_PATTERNS[@]}"; do
   fi
 done
 
+# ── Hard-block regexes: rm -rf on root/system paths, raw dd to devices ───────
+HARD_REGEX_PATTERNS=(
+  "rm[[:space:]]+(-[A-Za-z]*[rR][A-Za-z]*[[:space:]]+)+(-[A-Za-z]+[[:space:]]+)*(\"|')?/([[:space:]]|\"|'|$)"
+  "rm[[:space:]].*[[:space:]](\"|')?/(bin|boot|dev|etc|lib|proc|root|sbin|sys|usr|var)(/|[[:space:]]|\"|'|$)"
+  "dd[[:space:]]+[^|;&]*of=/dev/"
+)
+
+for pattern in "${HARD_REGEX_PATTERNS[@]}"; do
+  if [[ "$COMMAND" =~ $pattern ]]; then
+    echo '{"decision": "block", "reason": "BLOCKED: Command matches destructive pattern (rm -rf on system path / raw device write). Never allowed — see .claude/rules/safety.md."}'
+    exit 2
+  fi
+done
+
 # ── Confirm-worthy: blocked until the operator explicitly confirms ───────────
-# Regexes run against the whole command, so `ssh <alias> 'reboot'` is caught.
+# Regexes run against the whole command, so `ssh <alias> 'reboot'` and
+# unquoted `ssh <alias> reboot` are both caught.
 shopt -s nocasematch
 CONFIRM_PATTERNS=(
   "DROP[[:space:]]+(DATABASE|TABLE)"
@@ -43,9 +56,25 @@ CONFIRM_PATTERNS=(
   "docker[[:space:]]+system[[:space:]]+prune"
   "docker[[:space:]]+volume[[:space:]]+prune"
   "docker([[:space:]]+compose|-compose)[[:space:]]+down"
+  "docker[[:space:]]+(rm|rmi)[[:space:]]"
   "so-wipe"
-  "(^|[;&|]|['\"])[[:space:]]*(sudo[[:space:]]+)?(reboot|poweroff|shutdown)([[:space:]]|['\"]|$)"
+  "(^|[[:space:];&|]|['\"])(sudo[[:space:]]+)?(reboot|poweroff|shutdown|halt)([[:space:]]|['\"]|$)"
+  # any recursive rm — always confirm (must-hold rule; /tmp cleanups included)
+  "rm[[:space:]]+(-[A-Za-z]*[rR][A-Za-z]*|--recursive)[[:space:]]"
+  # hypervisor guest lifecycle
+  "(pct|qm)[[:space:]]+(stop|shutdown|destroy|delete)[[:space:]]"
+  # storage destruction
+  "(zpool|zfs)[[:space:]]+(destroy|detach|remove|clear)[[:space:]]"
+  "wipefs|sgdisk[[:space:]]+(-Z|--zap)"
 )
+
+# systemctl restart/stop/disable/mask at system level needs confirmation;
+# `systemctl --user ...` (blunderbus unit deploys) is routine and exempt.
+if [[ "$COMMAND" =~ systemctl[[:space:]]+(restart|stop|disable|mask)[[:space:]] ]] \
+   && ! [[ "$COMMAND" =~ systemctl[[:space:]]+--user ]]; then
+  echo '{"decision": "block", "reason": "CONFIRM REQUIRED: system-level systemctl restart/stop/disable/mask affects availability. Ask the operator first (see .claude/rules/safety.md)."}'
+  exit 2
+fi
 
 for pattern in "${CONFIRM_PATTERNS[@]}"; do
   if [[ "$COMMAND" =~ $pattern ]]; then

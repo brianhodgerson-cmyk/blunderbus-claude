@@ -84,3 +84,16 @@ curl -s -X POST -H "Authorization: Bearer $LITELLM_API_KEY" \
 |-----------|--------|--------|
 | Clickhouse | ✅/❌ | Databases, table count |
 | LiteLLM | ✅/❌ | Models available, 24h spend |
+
+## ClickHouse access & credentials (runbook)
+
+ClickHouse on Cortex (`jarvis-clickhouse`) publishes both ports on the host — no SSH tunnel needed (verified 2026-07-06):
+
+- Native: `192.168.50.106:9000` (`clickhouse-driver` — preferred for scripts)
+- HTTP: `http://192.168.50.106:8123` (curl with Basic auth)
+
+Credentials are vault-managed since 2026-07-06: Vaultwarden item `clickhouse` → `CLICKHOUSE_USER` / `CLICKHOUSE_PASS` / `CLICKHOUSE_PASSWORD` via `scripts/vault.py` (no longer in `.env`).
+
+**Rotation:** server-side source of truth is `/opt/blunderbus-v3/docker/.env` on Cortex — update there, `docker compose up -d --force-recreate clickhouse langfuse` (langfuse shares the credential), then update the Vaultwarden item.
+
+**Anti-pattern:** `WHERE snapshot_date = today()` — Monarch ingest runs overnight, so today's date returns no rows. Always use `WHERE snapshot_date = (SELECT max(snapshot_date) FROM table)`.
