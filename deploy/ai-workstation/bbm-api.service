@@ -1,5 +1,6 @@
 [Unit]
 Description=BlunderBus Memory API (FastAPI) on AI-Workstation
+OnFailure=blunderbus-failure-agent@%n.service
 After=network-online.target
 Wants=network-online.target
 

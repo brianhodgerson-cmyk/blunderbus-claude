@@ -1,5 +1,6 @@
 [Unit]
 Description=Wyoming ASR shim for warm Canary STT (serves HA Assist on :10300)
+OnFailure=blunderbus-failure-agent@%n.service
 After=network-online.target canary-stt.service
 Wants=canary-stt.service
 

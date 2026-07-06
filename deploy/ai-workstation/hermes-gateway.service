@@ -1,5 +1,6 @@
 [Unit]
 Description=Hermes Agent Gateway - Messaging Platform Integration
+OnFailure=blunderbus-failure-agent@%n.service
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0

@@ -1,5 +1,6 @@
 [Unit]
 Description=BlunderBus daily brief live delivery on AI-Workstation
+OnFailure=blunderbus-failure-agent@%n.service
 Documentation=file:/home/brian/blunderbus-claude/scripts/run_pipeline.sh
 Wants=network-online.target
 After=network-online.target bbm-api.service

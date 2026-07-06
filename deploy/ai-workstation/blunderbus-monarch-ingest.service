@@ -1,5 +1,6 @@
 [Unit]
 Description=BlunderBus Monarch ingest production run on AI-Workstation
+OnFailure=blunderbus-failure-agent@%n.service
 Documentation=file:/home/brian/blunderbus-claude/scripts/run_pipeline.sh
 After=network-online.target
 

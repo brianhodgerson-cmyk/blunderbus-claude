@@ -101,4 +101,19 @@ def resolve_claude_command() -> str | None:
         if candidate.exists():
             return str(candidate)
 
+    # Claude Desktop ships versioned binaries with no stable PATH entry
+    # (~/.config/Claude/claude-code/<version>/claude). Pick the newest so
+    # systemd jobs survive app updates without CLAUDE_BIN churn.
+    desktop_dir = Path.home() / ".config" / "Claude" / "claude-code"
+    if desktop_dir.is_dir():
+        def _ver_key(p: Path) -> tuple:
+            try:
+                return tuple(int(x) for x in p.parent.name.split("."))
+            except ValueError:
+                return (0,)
+        versioned = sorted(desktop_dir.glob("*/claude"), key=_ver_key)
+        for candidate in reversed(versioned):
+            if candidate.is_file() and os.access(candidate, os.X_OK):
+                return str(candidate)
+
     return None

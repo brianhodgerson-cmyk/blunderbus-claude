@@ -1,5 +1,6 @@
 [Unit]
 Description=BlunderBus drift sentinel — registry vs reality nightly audit
+OnFailure=blunderbus-failure-agent@%n.service
 Documentation=file:/home/brian/blunderbus-claude/scripts/agents/drift.py
 Wants=network-online.target
 After=network-online.target

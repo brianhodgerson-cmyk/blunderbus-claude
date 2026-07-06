@@ -1,5 +1,6 @@
 [Unit]
 Description=BlunderBus CouchDB Vault Sync on AI-Workstation
+OnFailure=blunderbus-failure-agent@%n.service
 After=network-online.target
 Wants=network-online.target
 Requires=bbm-api.service

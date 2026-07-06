@@ -1,5 +1,6 @@
 [Unit]
 Description=Jarvis Stream Deck button daemon
+OnFailure=blunderbus-failure-agent@%n.service
 After=graphical-session.target
 
 [Service]
