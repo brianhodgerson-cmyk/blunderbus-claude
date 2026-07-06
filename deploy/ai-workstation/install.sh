@@ -35,6 +35,7 @@ fi
 systemctl --user enable --now blunderbus-daily-brief.timer
 systemctl --user enable --now blunderbus-monarch-ingest.timer
 systemctl --user enable --now blunderbus-drift-sentinel.timer
+systemctl --user enable --now blunderbus-ssh-cert-renew.timer
 
 # Shadow dry-run timer is optional; enable for pipeline-change validation:
 # systemctl --user enable --now blunderbus-daily-brief-shadow.timer

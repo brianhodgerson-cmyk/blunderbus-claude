@@ -1,0 +1,13 @@
+[Unit]
+Description=BlunderBus SSH CA — renew workstation user certificate
+OnFailure=blunderbus-failure-agent@%n.service
+Documentation=file:/home/brian/blunderbus-claude/scripts/ssh_ca.py
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=PATH=/home/brian/blunderbus-claude/.venv/bin:/home/brian/.local/bin:/home/brian/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+ExecStart=/home/brian/blunderbus-claude/.venv/bin/python /home/brian/blunderbus-claude/scripts/ssh_ca.py sign
+Nice=10
+StandardOutput=append:/home/brian/blunderbus-claude/logs/systemd-ssh-cert-renew.log
+StandardError=append:/home/brian/blunderbus-claude/logs/systemd-ssh-cert-renew.log

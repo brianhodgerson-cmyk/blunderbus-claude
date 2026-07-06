@@ -126,7 +126,7 @@ Important:
 
 ## Authentication
 
-SSH uses a **local key file** (`~/.ssh/id_ed25519`) — no agent, no Bitwarden dependency. The key is deployed to all hosts via `authorized_keys`. The SSH config (`~/.ssh/config`) on AI-Workstation is hand-maintained; `.ssh-config.example` in this repo is the canonical reference.
+SSH uses a **local key file** (`~/.ssh/id_ed25519`) — no agent, no Bitwarden dependency. The key is deployed to all hosts via `authorized_keys`. **Since 2026-07-06 an SSH CA also runs (roadmap §4):** CA key at `~/.ssh/blunderbus_ca` (backed up in Vaultwarden item `ssh-ca`); all running Linux hosts trust it via `TrustedUserCAKeys /etc/ssh/blunderbus_ca.pub` (drop-in `60-blunderbus-ca.conf`). The workstation cert (`id_ed25519-cert.pub`, principals root/brian/blunderbus/truenas_admin/russ, 30d validity) renews weekly via `blunderbus-ssh-cert-renew.timer`. Tooling: `scripts/ssh_ca.py {init,sign,trust,verify,status}` — onboarding a new machine = sign a cert, no authorized_keys edits. Appliances (Heimdall/TrueNAS, Jarvis/HA addon) and stopped guests keep plain-key auth only. The SSH config (`~/.ssh/config`) on AI-Workstation is hand-maintained; `.ssh-config.example` in this repo is the canonical reference.
 
 API secrets (Obsidian, Discord, TrueNAS, etc.) are stored in Vaultwarden and loaded at runtime via `scripts/vault.py` using `BW_MASTER_PASS` from `.env`.
 
