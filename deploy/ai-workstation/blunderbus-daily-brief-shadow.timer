@@ -1,0 +1,11 @@
+[Unit]
+Description=Run BlunderBus daily brief shadow dry-run daily on AI-Workstation
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 America/Chicago
+Persistent=true
+RandomizedDelaySec=5m
+Unit=blunderbus-daily-brief-shadow.service
+
+[Install]
+WantedBy=timers.target

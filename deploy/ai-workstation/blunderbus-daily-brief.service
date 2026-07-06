@@ -1,0 +1,16 @@
+[Unit]
+Description=BlunderBus daily brief live delivery on AI-Workstation
+Documentation=file:/home/brian/blunderbus-claude/scripts/run_pipeline.sh
+Wants=network-online.target
+After=network-online.target bbm-api.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=PATH=/home/brian/blunderbus-claude/.venv/bin:/home/brian/.hermes/node/bin:/home/brian/.local/bin:/home/brian/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+Environment=BBM_OPS_API_BASE=http://127.0.0.1:8000
+Environment=DISCORD_BRIEF_CHANNEL_ID=1477768383645749271
+ExecStart=/home/brian/blunderbus-claude/scripts/run_pipeline.sh daily_brief.py
+Nice=5
+StandardOutput=append:/home/brian/blunderbus-claude/logs/systemd-daily-brief.log
+StandardError=append:/home/brian/blunderbus-claude/logs/systemd-daily-brief.log

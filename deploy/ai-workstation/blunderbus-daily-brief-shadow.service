@@ -1,0 +1,12 @@
+[Unit]
+Description=BlunderBus daily brief shadow dry-run on AI-Workstation
+Documentation=file:/home/brian/blunderbus-claude/scripts/run_pipeline.sh
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=PATH=/home/brian/blunderbus-claude/.venv/bin:/home/brian/.hermes/node/bin:/home/brian/.local/bin:/home/brian/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+ExecStart=/home/brian/blunderbus-claude/scripts/run_pipeline.sh daily_brief.py --dry-run
+Nice=5
+StandardOutput=append:/home/brian/blunderbus-claude/logs/systemd-daily-brief-shadow.log
+StandardError=append:/home/brian/blunderbus-claude/logs/systemd-daily-brief-shadow.log

@@ -1,0 +1,21 @@
+[Unit]
+Description=BlunderBus CouchDB Vault Sync on AI-Workstation
+After=network-online.target
+Wants=network-online.target
+Requires=bbm-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=COUCHDB_URL=http://127.0.0.1:5984
+Environment=COUCHDB_DB=obsidian-livesync
+Environment=COUCHDB_USER=admin
+EnvironmentFile=/home/brian/blunderbus-claude/.env
+ExecStart=/home/brian/blunderbus-claude/.venv/bin/python3 /home/brian/blunderbus-claude/scripts/couchdb_sync.py --watch
+Restart=on-failure
+RestartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

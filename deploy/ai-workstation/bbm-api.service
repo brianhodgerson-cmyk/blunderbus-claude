@@ -1,0 +1,29 @@
+[Unit]
+Description=BlunderBus Memory API (FastAPI) on AI-Workstation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/brian/blunderbus-claude/scripts
+EnvironmentFile=/home/brian/blunderbus-claude/.env
+Environment=PYTHONPATH=/home/brian/blunderbus-claude/scripts
+Environment=PATH=/home/brian/.local/bin:/home/brian/.hermes/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+Environment=BW_BIN=/home/brian/.local/bin/bw-vaultwarden-2024
+Environment=BW_LOGIN_EMAIL=jarvis@hodgespot.com
+Environment=BLUNDERBUS_DB_HOST=192.168.50.106
+Environment=BLUNDERBUS_DB_PORT=5432
+Environment=BLUNDERBUS_DB_USER=jarvis
+Environment=BLUNDERBUS_DB_NAME=blunderbus_memory
+Environment=BBM_REGISTRY_ROOT=/home/brian/blunderbus-claude/memory/registry
+Environment=BBM_TASKS_FILE=/home/brian/blunderbus-claude/TASKS.md
+Environment=BBM_EXT_TASKS_FILE=/home/brian/blunderbus-claude/data/external_tasks.json
+Environment=BBM_BRIEFS_DIR=/home/brian/blunderbus-claude/data/briefs
+ExecStart=/home/brian/blunderbus-claude/.venv/bin/uvicorn blunderbus_memory.api:app --host 0.0.0.0 --port 8000 --workers 2 --log-level info
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,22 @@
+[Unit]
+Description=BlunderBus MCP server on AI-Workstation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=PYTHONUNBUFFERED=1
+Environment=MCP_PORT=8789
+Environment=BLUNDERBUS_PROJECT_ROOT=/home/brian/blunderbus-claude
+Environment=OAUTH_ISSUER_URL=https://bb-mcp.hodgespot.com
+Environment=PATH=/home/brian/.hermes/node/bin:/home/brian/blunderbus-claude/.venv/bin:/home/brian/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=BW_BIN=/home/brian/.hermes/node/bin/bw
+ExecStart=/home/brian/blunderbus-claude/.venv/bin/python /home/brian/blunderbus-claude/mcp-servers/anthropic-bridge/server.py --http
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

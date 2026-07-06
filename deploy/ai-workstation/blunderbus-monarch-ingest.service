@@ -1,0 +1,13 @@
+[Unit]
+Description=BlunderBus Monarch ingest production run on AI-Workstation
+Documentation=file:/home/brian/blunderbus-claude/scripts/run_pipeline.sh
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/brian/blunderbus-claude
+Environment=PATH=/home/brian/blunderbus-claude/.venv/bin:/home/brian/.hermes/node/bin:/home/brian/.local/bin:/home/brian/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin
+ExecStart=/home/brian/blunderbus-claude/scripts/run_pipeline.sh monarch_ingest.py
+Nice=5
+StandardOutput=append:/home/brian/blunderbus-claude/logs/systemd-monarch-ingest.log
+StandardError=append:/home/brian/blunderbus-claude/logs/systemd-monarch-ingest.log
