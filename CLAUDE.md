@@ -40,7 +40,7 @@ LXC containers are minimal Debian — **SSH user is always `root`**. No non-root
 | VM | Host | IP | SSH Alias | Status | Role |
 |----|------|----|-----------|--------|------|
 | 200 | Groot | 192.168.50.53 | `groot` | running | AdGuard Home DNS (`:80` web, `:53` DNS) |
-| 202 | Banner | 192.168.50.202 | `banner` | running | Grafana (`:3000`), Prometheus, InfluxDB |
+| 202 | Banner | 192.168.50.202 | `banner` | running | Grafana (`:3000`), Prometheus, Alertmanager (`:9093` → dispatcher webhook, wired 2026-07-06), InfluxDB |
 | 205 | Hawkeye | 192.168.50.205 | `hawkeye-nvr` | running | Frigate NVR (`:5000`) |
 | 207 | Loki | 192.168.50.207 | `loki` | running | Loki log aggregation (`:3100`) |
 | 108 | Mercury | 192.168.50.109 | `mercury` | running | Russ's TLS workspace (memory-architecture tenant); user `russ` exists |
