@@ -48,6 +48,11 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# The claude CLI prefers ANTHROPIC_API_KEY over subscription OAuth. The key in
+# .env is the zero-credit litellm one (parked) — pipeline AI goes through the
+# operator's Claude subscription instead. Remove this line to switch back.
+unset ANTHROPIC_API_KEY
+
 if [[ -z "${BW_MASTER_PASS:-}" ]]; then
     log "ERROR: BW_MASTER_PASS not set in .env"
     exit 1

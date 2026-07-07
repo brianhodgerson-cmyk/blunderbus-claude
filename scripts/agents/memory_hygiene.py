@@ -359,8 +359,9 @@ def main() -> int:
         print(f"! concern sync failed: {exc}", file=sys.stderr)
 
     if stale_facts_all:
+        filed = "would file concern" if dry else "concern filed"
         print(f"{tag}{len(stale_facts_all)} possibly-stale fact(s) flagged "
-              "(concern filed, nothing deleted):")
+              f"({filed}, nothing deleted):")
         for s in stale_facts_all[:10]:
             print(f"    - {s}")
 
